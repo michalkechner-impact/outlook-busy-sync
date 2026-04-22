@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,33 +15,33 @@ import (
 
 const keyringService = "outlook-busy-sync"
 
-// tokenStore persists MSAL's serialized cache for one account. It prefers
-// the macOS Keychain (via go-keyring) and falls back to a file in the user's
-// config dir whenever the keyring is unavailable OR refuses the payload.
+// tokenStore persists MSAL's serialized cache for one account. Policy:
 //
-// macOS Keychain "generic password" items have a payload size limit on the
-// order of a few KB. The MSAL cache (multiple tokens, account info,
-// authority metadata) routinely exceeds that, especially after a few token
-// refreshes. Rather than try to chunk the cache across multiple Keychain
-// items, we fall back to a 0600 file in $XDG_CONFIG_HOME the moment the
-// Keychain rejects the write. The file is on disk in the user's home
-// directory, which is the same trust boundary as the Keychain for a
-// single-user macOS install.
+//   - One authoritative backend per process. At construction we probe
+//     the OS keyring; if it's unusable we pin `preferFile=true` for the
+//     lifetime of this store, so load() and save() cannot disagree about
+//     where the token lives.
+//   - When the keyring IS usable, we still fall back to the file for a
+//     single save if the keyring rejects a specific payload (size limits
+//     on macOS Keychain are the common case). On the following save the
+//     keyring gets tried again and, on success, the stale file copy is
+//     atomically replaced or removed.
+//   - File writes are atomic (temp-file + rename) so a crash mid-write
+//     never truncates the cache. Mode 0600 is enforced on every POSIX
+//     platform, not just darwin.
 type tokenStore struct {
 	account string
-	// filePath is the fallback location used whenever the keyring rejects
-	// the payload (size, locked keychain, missing entitlement, etc).
-	filePath   string
+	// filePath is the fallback location used whenever the keyring is
+	// unavailable OR rejects the payload.
+	filePath string
+	// preferFile flips to true at construction if the keyring isn't
+	// usable at all (e.g. headless Linux with no Secret Service). It
+	// never flips back within one process.
 	preferFile bool
 }
 
 func newTokenStore(account string) (tokenStore, error) {
 	ts := tokenStore{account: account}
-	// Probe the keyring once. On macOS it is always available; on headless
-	// Linux CI it may not be.
-	if _, err := keyring.Get(keyringService, account+"__probe"); err != nil && errors.Is(err, keyring.ErrUnsupportedPlatform) {
-		ts.preferFile = true
-	}
 	dir, err := configDir()
 	if err != nil {
 		return ts, err
@@ -49,6 +50,28 @@ func newTokenStore(account string) (tokenStore, error) {
 		return ts, err
 	}
 	ts.filePath = filepath.Join(dir, "tokens-"+account+".json")
+
+	// Probe the keyring with a real round-trip: write+delete a dummy value.
+	// ErrUnsupportedPlatform and any actual keyring error mean "unusable".
+	// The probe value is immediately cleaned up. We don't key off Get()
+	// because ErrNotFound would be the normal return for a fresh install.
+	probeKey := account + "__probe__"
+	if err := keyring.Set(keyringService, probeKey, "1"); err != nil {
+		if !errors.Is(err, keyring.ErrUnsupportedPlatform) {
+			slog.Debug("keyring unusable, preferring file backend",
+				slog.String("account", account),
+				slog.String("err", err.Error()))
+		}
+		ts.preferFile = true
+	} else {
+		if err := keyring.Delete(keyringService, probeKey); err != nil {
+			// Probe write worked but cleanup didn't. That's odd but not
+			// fatal — just log and proceed with keyring-preferred.
+			slog.Debug("keyring probe cleanup failed",
+				slog.String("account", account),
+				slog.String("err", err.Error()))
+		}
+	}
 	return ts, nil
 }
 
@@ -69,35 +92,76 @@ func (t tokenStore) load() ([]byte, error) {
 		if err == nil {
 			return []byte(v), nil
 		}
-		// Treat any keyring read error as "no cached value" and fall through
-		// to the file. Real fatal errors (permission denied etc.) will resurface
-		// when we attempt the file read.
+		if !errors.Is(err, keyring.ErrNotFound) && !errors.Is(err, keyring.ErrUnsupportedPlatform) {
+			// Surface any non-"missing" keyring error instead of silently
+			// pretending the cache is empty. A corrupted or locked
+			// keychain is something the user needs to know about.
+			return nil, fmt.Errorf("keyring read: %w", err)
+		}
 	}
 	b, err := os.ReadFile(t.filePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	return b, err
+	if err != nil {
+		return nil, fmt.Errorf("file read %s: %w", t.filePath, err)
+	}
+	return b, nil
 }
 
 func (t tokenStore) save(data []byte) error {
-	// Try keychain first. Any failure (size limit, locked, missing entitlement)
-	// transparently falls through to the file backend - the cache contents are
-	// already protected by the user's home directory permissions on macOS.
+	// When the keyring is usable, attempt keyring first. On success we
+	// also remove any stale file copy so the on-disk cache doesn't drift.
 	if !t.preferFile {
 		if err := keyring.Set(keyringService, t.account, string(data)); err == nil {
-			// Drop any prior file-backed copy so we have a single source of
-			// truth and don't leak a stale cache on disk.
-			_ = os.Remove(t.filePath)
+			if rmErr := os.Remove(t.filePath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				slog.Warn("keyring save ok but stale file not removed",
+					slog.String("path", t.filePath),
+					slog.String("err", rmErr.Error()))
+			}
 			return nil
+		} else {
+			// Log-and-fallthrough. Common on macOS when the cache grows
+			// past the generic-password size limit; the file fallback is
+			// specifically designed for this.
+			slog.Debug("keyring save failed, falling back to file",
+				slog.String("account", t.account),
+				slog.String("err", err.Error()))
 		}
 	}
-	if err := os.WriteFile(t.filePath, data, 0o600); err != nil {
-		return fmt.Errorf("file save: %w", err)
+	return writeFileAtomic(t.filePath, data, 0o600)
+}
+
+// writeFileAtomic writes data to path via a temp file in the same
+// directory, then renames. Avoids leaving a truncated cache on crash
+// mid-write and enforces mode 0600 on all POSIX platforms.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tokens-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
 	}
-	// Paranoid permission check on macOS where umask may widen perms.
-	if runtime.GOOS == "darwin" {
-		_ = os.Chmod(t.filePath, 0o600)
+	tmpPath := tmp.Name()
+	// Best-effort cleanup if we bail out before rename.
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(tmpPath, mode); err != nil {
+			cleanup()
+			return fmt.Errorf("chmod temp: %w", err)
+		}
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
 }
@@ -107,10 +171,10 @@ func (t tokenStore) clear() error {
 	if err := keyring.Delete(keyringService, t.account); err != nil &&
 		!errors.Is(err, keyring.ErrNotFound) &&
 		!errors.Is(err, keyring.ErrUnsupportedPlatform) {
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("keyring delete: %w", err))
 	}
 	if err := os.Remove(t.filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("file remove: %w", err))
 	}
 	return errors.Join(errs...)
 }

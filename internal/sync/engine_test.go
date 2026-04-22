@@ -16,6 +16,10 @@ type fakeClient struct {
 	events []graph.Event
 	nextID int
 	ops    []string // "create <subject>@<start>", "update <id>", "delete <id>"
+	// failCreate, failUpdate, failDelete cause the matching op to error
+	// without mutating the event list. Set per-test to exercise the
+	// partial-failure paths in RunPair.
+	failCreate, failUpdate, failDelete bool
 }
 
 func (f *fakeClient) ListEvents(ctx context.Context, start, end time.Time) ([]graph.Event, error) {
@@ -23,6 +27,9 @@ func (f *fakeClient) ListEvents(ctx context.Context, start, end time.Time) ([]gr
 }
 
 func (f *fakeClient) CreateEvent(ctx context.Context, e graph.Event) (graph.Event, error) {
+	if f.failCreate {
+		return graph.Event{}, fmt.Errorf("synthetic create failure")
+	}
 	f.nextID++
 	e.ID = fmt.Sprintf("%s-%d", f.name, f.nextID)
 	f.events = append(f.events, e)
@@ -31,6 +38,9 @@ func (f *fakeClient) CreateEvent(ctx context.Context, e graph.Event) (graph.Even
 }
 
 func (f *fakeClient) UpdateEvent(ctx context.Context, id string, e graph.Event) (graph.Event, error) {
+	if f.failUpdate {
+		return graph.Event{}, fmt.Errorf("synthetic update failure")
+	}
 	for i, ev := range f.events {
 		if ev.ID == id {
 			e.ID = id
@@ -43,6 +53,9 @@ func (f *fakeClient) UpdateEvent(ctx context.Context, id string, e graph.Event) 
 }
 
 func (f *fakeClient) DeleteEvent(ctx context.Context, id string) error {
+	if f.failDelete {
+		return fmt.Errorf("synthetic delete failure")
+	}
 	for i, ev := range f.events {
 		if ev.ID == id {
 			f.events = append(f.events[:i], f.events[i+1:]...)
@@ -215,6 +228,111 @@ func TestRunPair_doesNotTouchUnrelatedTargetEvents(t *testing.T) {
 	}
 	if !found {
 		t.Error("engine deleted an event it did not own")
+	}
+}
+
+func TestRunPair_partialFailureReturnsError(t *testing.T) {
+	// A scheduled launchd/systemd/Task-Scheduler run keys exit code off
+	// RunPair's error return. Silent per-op failures must not report
+	// success to the scheduler, or the target calendar drifts and nobody
+	// notices until a meeting is double-booked.
+	src := &fakeClient{name: "work", events: []graph.Event{
+		{ID: "s1", Start: tm(2026, 4, 14, 10), End: tm(2026, 4, 14, 11), ShowAs: "busy", ResponseType: "accepted"},
+	}}
+	dst := &fakeClient{name: "client", failCreate: true}
+	stats, err := engineWith(src, dst).RunPair(context.Background(), defaultPair())
+	if err == nil {
+		t.Fatal("partial failure must return a non-nil error")
+	}
+	if stats.Errors != 1 {
+		t.Errorf("Errors counter should reflect the failed op, got %+v", stats)
+	}
+}
+
+func TestRunPair_dryRunMakesNoMutations(t *testing.T) {
+	src := &fakeClient{name: "work", events: []graph.Event{
+		{ID: "s1", Start: tm(2026, 4, 14, 10), End: tm(2026, 4, 14, 11), ShowAs: "busy", ResponseType: "accepted"},
+	}}
+	dst := &fakeClient{name: "client"}
+	pair := defaultPair()
+	pair.DryRun = true
+	stats, err := engineWith(src, dst).RunPair(context.Background(), pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Created != 1 {
+		t.Errorf("dry-run should still report what it WOULD do: %+v", stats)
+	}
+	if len(dst.events) != 0 || len(dst.ops) != 0 {
+		t.Errorf("dry-run must not call any write operations: events=%v ops=%v", dst.events, dst.ops)
+	}
+}
+
+func TestRunPair_emptyWindowIsNoop(t *testing.T) {
+	src := &fakeClient{name: "work"}
+	dst := &fakeClient{name: "client"}
+	stats, err := engineWith(src, dst).RunPair(context.Background(), defaultPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Created+stats.Updated+stats.Deleted+stats.Errors != 0 {
+		t.Errorf("empty window: nothing should happen, got %+v", stats)
+	}
+}
+
+func TestRunPair_recurringInstancesAreIndependent(t *testing.T) {
+	// Graph's calendarView expands a recurring series into instances with
+	// distinct IDs. Each instance must be mirrored independently.
+	src := &fakeClient{name: "work", events: []graph.Event{
+		{ID: "series-1", Start: tm(2026, 4, 14, 10), End: tm(2026, 4, 14, 11), ShowAs: "busy", ResponseType: "accepted"},
+		{ID: "series-2", Start: tm(2026, 4, 15, 10), End: tm(2026, 4, 15, 11), ShowAs: "busy", ResponseType: "accepted"},
+		{ID: "series-3", Start: tm(2026, 4, 16, 10), End: tm(2026, 4, 16, 11), ShowAs: "busy", ResponseType: "accepted"},
+	}}
+	dst := &fakeClient{name: "client"}
+	stats, err := engineWith(src, dst).RunPair(context.Background(), defaultPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Created != 3 {
+		t.Errorf("each recurring instance should produce a distinct busy block: %+v", stats)
+	}
+	refs := map[string]bool{}
+	for _, ev := range dst.events {
+		refs[ev.SourceRef] = true
+	}
+	if len(refs) != 3 {
+		t.Errorf("want 3 distinct SourceRefs, got %v", refs)
+	}
+}
+
+func TestRunPair_matchingAcrossTimezones(t *testing.T) {
+	// Target event already exists but its time.Time is in a non-UTC zone
+	// carrying the same instant. equalShape must use time.Equal semantics
+	// (instant comparison), not wall-clock, or we'd churn updates every
+	// run.
+	ams, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Skipf("tz data unavailable: %v", err)
+	}
+	src := &fakeClient{name: "work", events: []graph.Event{
+		{ID: "s1", Start: tm(2026, 4, 14, 10), End: tm(2026, 4, 14, 11), ShowAs: "busy", ResponseType: "accepted"},
+	}}
+	dst := &fakeClient{name: "client", events: []graph.Event{
+		{
+			ID:        "tgt-1",
+			Subject:   "Busy",
+			Start:     time.Date(2026, 4, 14, 12, 0, 0, 0, ams), // same instant as 10:00 UTC
+			End:       time.Date(2026, 4, 14, 13, 0, 0, 0, ams),
+			ShowAs:    "busy",
+			SourceRef: "work:s1",
+		},
+	}}
+	stats, err := engineWith(src, dst).RunPair(context.Background(), defaultPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Updated != 0 {
+		t.Errorf("identical instant in different tz must not trigger update: %+v", stats)
 	}
 }
 

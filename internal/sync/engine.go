@@ -58,7 +58,11 @@ func New(clients Clients, logger *slog.Logger) *Engine {
 	return &Engine{clients: clients, log: logger, now: time.Now}
 }
 
-// RunPair executes a single one-way sync.
+// RunPair executes a single one-way sync. A non-nil error signals that
+// the caller should treat this pair as failed (non-zero exit), including
+// the case where individual event operations failed partway through —
+// a silent "2 out of 5 creates succeeded" return would let a scheduled
+// cron job report success while the target calendar drifted out of sync.
 func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, error) {
 	src, ok := e.clients[pair.From]
 	if !ok {
@@ -72,7 +76,11 @@ func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, 
 	start := e.now().Add(-time.Duration(pair.LookbackDays) * 24 * time.Hour)
 	end := e.now().Add(time.Duration(pair.LookaheadDays) * 24 * time.Hour)
 
-	log := e.log.With(slog.String("from", pair.From), slog.String("to", pair.To))
+	log := e.log.With(
+		slog.String("from", pair.From),
+		slog.String("to", pair.To),
+		slog.Bool("dry_run", pair.DryRun),
+	)
 	log.Info("listing source events", slog.Time("from", start), slog.Time("to", end))
 	srcEvents, err := src.ListEvents(ctx, start, end)
 	if err != nil {
@@ -118,6 +126,10 @@ func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, 
 				continue
 			}
 			log.Info("update", slog.String("subject", "(busy block)"), slog.Time("start", want.Start))
+			if pair.DryRun {
+				stats.Updated++
+				continue
+			}
 			if _, err := dst.UpdateEvent(ctx, have.ID, want); err != nil {
 				log.Error("update failed", slog.String("err", err.Error()))
 				stats.Errors++
@@ -126,6 +138,10 @@ func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, 
 			stats.Updated++
 		} else {
 			log.Info("create", slog.Time("start", want.Start), slog.Time("end", want.End))
+			if pair.DryRun {
+				stats.Created++
+				continue
+			}
 			if _, err := dst.CreateEvent(ctx, want); err != nil {
 				log.Error("create failed", slog.String("err", err.Error()))
 				stats.Errors++
@@ -141,6 +157,10 @@ func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, 
 			continue
 		}
 		log.Info("delete", slog.String("ref", ref))
+		if pair.DryRun {
+			stats.Deleted++
+			continue
+		}
 		if err := dst.DeleteEvent(ctx, ev.ID); err != nil {
 			log.Error("delete failed", slog.String("err", err.Error()))
 			stats.Errors++
@@ -157,6 +177,9 @@ func (e *Engine) RunPair(ctx context.Context, pair config.ResolvedPair) (Stats, 
 		slog.Int("skipped", stats.Skipped),
 		slog.Int("errors", stats.Errors),
 	)
+	if stats.Errors > 0 {
+		return stats, fmt.Errorf("%d event operation(s) failed", stats.Errors)
+	}
 	return stats, nil
 }
 

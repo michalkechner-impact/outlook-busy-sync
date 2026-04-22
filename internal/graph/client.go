@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	baseURL = "https://graph.microsoft.com/v1.0"
+	// DefaultBaseURL is Graph API v1.0. Overridable on Client for tests.
+	DefaultBaseURL = "https://graph.microsoft.com/v1.0"
 
 	// SyncPropGUID is a random namespace owned by this tool, scoping the
 	// single-value extended property we use to tag synced events. Do not
@@ -30,6 +31,13 @@ const (
 	// FullPropID is the "PropertyId" string Graph API uses for filtering /
 	// expanding extended properties.
 	FullPropID = "String {" + SyncPropGUID + "} Name " + SyncPropName
+
+	// listPageSize is the $top we request from calendarView. Graph has a
+	// documented quirk where combining $expand on extended properties with
+	// larger page sizes can silently drop events on paginated responses.
+	// 25 matches the conservative limit Microsoft's own SDKs use for this
+	// combination.
+	listPageSize = 25
 )
 
 // TokenSource produces a fresh access token on demand. The auth package
@@ -42,6 +50,9 @@ type TokenSource interface {
 type Client struct {
 	tokens     TokenSource
 	httpClient *http.Client
+	// baseURL is exported via New's default; set directly in tests to
+	// redirect traffic at an httptest server.
+	baseURL string
 }
 
 // New returns a Client that authenticates with ts.
@@ -49,8 +60,12 @@ func New(ts TokenSource) *Client {
 	return &Client{
 		tokens:     ts,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    DefaultBaseURL,
 	}
 }
+
+// SetBaseURL overrides the Graph base URL. Intended for tests.
+func (c *Client) SetBaseURL(u string) { c.baseURL = u }
 
 // Event is a normalized representation of a Graph calendar event.
 type Event struct {
@@ -74,13 +89,17 @@ func (c *Client) ListEvents(ctx context.Context, start, end time.Time) ([]Event,
 	q := url.Values{}
 	q.Set("startDateTime", start.UTC().Format(time.RFC3339))
 	q.Set("endDateTime", end.UTC().Format(time.RFC3339))
-	q.Set("$top", "200")
+	q.Set("$top", strconv.Itoa(listPageSize))
 	q.Set("$select", "id,subject,start,end,isAllDay,showAs,isCancelled,responseStatus")
 	q.Set("$expand", "singleValueExtendedProperties($filter=id eq '"+FullPropID+"')")
 
-	endpoint := baseURL + "/me/calendarView?" + q.Encode()
+	endpoint := c.baseURL + "/me/calendarView?" + q.Encode()
 	var out []Event
-	for endpoint != "" {
+	// Guard against a pathological Graph response that returns the same
+	// @odata.nextLink forever. With listPageSize=25 and a reasonable sync
+	// window this bounds us to tens of thousands of events.
+	const maxPages = 1000
+	for pages := 0; endpoint != "" && pages < maxPages; pages++ {
 		var resp struct {
 			Value    []rawEvent `json:"value"`
 			NextLink string     `json:"@odata.nextLink"`
@@ -89,7 +108,14 @@ func (c *Client) ListEvents(ctx context.Context, start, end time.Time) ([]Event,
 			return nil, err
 		}
 		for _, r := range resp.Value {
-			out = append(out, r.normalize())
+			ev, err := r.normalize()
+			if err != nil {
+				// A malformed event is logged by the caller via the error;
+				// drop it from the result rather than creating a garbage
+				// busy block at year 0001.
+				return nil, fmt.Errorf("normalize event %q: %w", r.ID, err)
+			}
+			out = append(out, ev)
 		}
 		endpoint = resp.NextLink
 	}
@@ -104,10 +130,10 @@ func (c *Client) CreateEvent(ctx context.Context, e Event) (Event, error) {
 		return Event{}, err
 	}
 	var got rawEvent
-	if err := c.doJSON(ctx, http.MethodPost, baseURL+"/me/events", body, &got); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, c.baseURL+"/me/events", body, &got); err != nil {
 		return Event{}, err
 	}
-	return got.normalize(), nil
+	return got.normalize()
 }
 
 // UpdateEvent patches start/end/subject/showAs on an existing event.
@@ -117,29 +143,29 @@ func (c *Client) UpdateEvent(ctx context.Context, id string, e Event) (Event, er
 		return Event{}, err
 	}
 	var got rawEvent
-	if err := c.doJSON(ctx, http.MethodPatch, baseURL+"/me/events/"+url.PathEscape(id), body, &got); err != nil {
+	if err := c.doJSON(ctx, http.MethodPatch, c.baseURL+"/me/events/"+url.PathEscape(id), body, &got); err != nil {
 		return Event{}, err
 	}
-	return got.normalize(), nil
+	return got.normalize()
 }
 
 // DeleteEvent removes an event by ID.
 func (c *Client) DeleteEvent(ctx context.Context, id string) error {
-	return c.doJSON(ctx, http.MethodDelete, baseURL+"/me/events/"+url.PathEscape(id), nil, nil)
+	return c.doJSON(ctx, http.MethodDelete, c.baseURL+"/me/events/"+url.PathEscape(id), nil, nil)
 }
 
 // --- internals ---
 
 type rawEvent struct {
-	ID             string        `json:"id,omitempty"`
-	Subject        string        `json:"subject"`
-	Start          rawDateTime   `json:"start"`
-	End            rawDateTime   `json:"end"`
-	IsAllDay       bool          `json:"isAllDay"`
-	ShowAs         string        `json:"showAs"`
-	IsCancelled    bool          `json:"isCancelled,omitempty"`
-	ResponseStatus *rawResponse  `json:"responseStatus,omitempty"`
-	ExtendedProps  []rawExtProp  `json:"singleValueExtendedProperties,omitempty"`
+	ID             string       `json:"id,omitempty"`
+	Subject        string       `json:"subject"`
+	Start          rawDateTime  `json:"start"`
+	End            rawDateTime  `json:"end"`
+	IsAllDay       bool         `json:"isAllDay"`
+	ShowAs         string       `json:"showAs"`
+	IsCancelled    bool         `json:"isCancelled,omitempty"`
+	ResponseStatus *rawResponse `json:"responseStatus,omitempty"`
+	ExtendedProps  []rawExtProp `json:"singleValueExtendedProperties,omitempty"`
 }
 
 type rawDateTime struct {
@@ -156,7 +182,7 @@ type rawExtProp struct {
 	Value string `json:"value"`
 }
 
-func (r rawEvent) normalize() Event {
+func (r rawEvent) normalize() (Event, error) {
 	e := Event{
 		ID:          r.ID,
 		Subject:     r.Subject,
@@ -164,8 +190,16 @@ func (r rawEvent) normalize() Event {
 		ShowAs:      r.ShowAs,
 		IsCancelled: r.IsCancelled,
 	}
-	e.Start = parseGraphTime(r.Start)
-	e.End = parseGraphTime(r.End)
+	start, err := parseGraphTime(r.Start)
+	if err != nil {
+		return Event{}, fmt.Errorf("start: %w", err)
+	}
+	end, err := parseGraphTime(r.End)
+	if err != nil {
+		return Event{}, fmt.Errorf("end: %w", err)
+	}
+	e.Start = start
+	e.End = end
 	if r.ResponseStatus != nil {
 		e.ResponseType = r.ResponseStatus.Response
 	}
@@ -174,20 +208,25 @@ func (r rawEvent) normalize() Event {
 			e.SourceRef = p.Value
 		}
 	}
-	return e
+	return e, nil
 }
 
-func parseGraphTime(dt rawDateTime) time.Time {
+// parseGraphTime converts Graph's {dateTime, timeZone} pair to a UTC time.
+// Returns an error rather than a zero value so callers cannot accidentally
+// persist a year-0001 busy block.
+func parseGraphTime(dt rawDateTime) (time.Time, error) {
 	if dt.DateTime == "" {
-		return time.Time{}
+		return time.Time{}, errors.New("empty dateTime")
 	}
 	// Graph returns "2026-04-13T09:00:00.0000000" with a separate timeZone
-	// field. We parse as the named zone (usually "UTC" for calendarView).
+	// field. We parse as the named zone; if unknown (e.g. Windows zone
+	// names sneak through when the Prefer: outlook.timezone header is
+	// ignored), we fall back to UTC rather than fail — the dateTime is
+	// the canonical part.
 	loc, err := time.LoadLocation(dt.TimeZone)
 	if err != nil {
 		loc = time.UTC
 	}
-	// Try a few layouts Graph has been observed to return.
 	for _, layout := range []string{
 		"2006-01-02T15:04:05.0000000",
 		"2006-01-02T15:04:05",
@@ -195,10 +234,10 @@ func parseGraphTime(dt rawDateTime) time.Time {
 		time.RFC3339,
 	} {
 		if t, err := time.ParseInLocation(layout, dt.DateTime, loc); err == nil {
-			return t.UTC()
+			return t.UTC(), nil
 		}
 	}
-	return time.Time{}
+	return time.Time{}, fmt.Errorf("unparseable dateTime %q (tz=%q)", dt.DateTime, dt.TimeZone)
 }
 
 func encodeWrite(e Event) (io.Reader, error) {
@@ -235,8 +274,22 @@ func encodeWrite(e Event) (io.Reader, error) {
 // returned as *APIError.
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Reader, out any) error {
 	const maxAttempts = 4
+	// Only GET/DELETE are retried on 5xx: they are idempotent. POST and
+	// PATCH are only retried on 429 (where Graph has explicitly told us
+	// it did not accept the request), because a 5xx retry on a write risks
+	// duplicating an event that in fact landed server-side before the
+	// error was returned.
+	retry5xx := method == http.MethodGet || method == http.MethodDelete
+
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Re-seek a seekable body to the start of each attempt so retries
+		// send the full payload.
+		if seeker, ok := body.(io.Seeker); ok && attempt > 0 {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("seek body for retry: %w", err)
+			}
+		}
 		req, err := c.newRequest(ctx, method, endpoint, body)
 		if err != nil {
 			return err
@@ -244,26 +297,33 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, body io.Re
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			lastErr = err
-			time.Sleep(backoff(attempt))
+			if err := sleepCtx(ctx, backoff(attempt)); err != nil {
+				return err
+			}
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			return err
+			lastErr = fmt.Errorf("%s %s: read body: %w", method, endpoint, err)
+			if err := sleepCtx(ctx, backoff(attempt)); err != nil {
+				return err
+			}
+			continue
 		}
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			lastErr = &APIError{Status: resp.StatusCode, Body: string(data)}
+		isTooMany := resp.StatusCode == http.StatusTooManyRequests
+		is5xx := resp.StatusCode >= 500
+		shouldRetry := isTooMany || (is5xx && retry5xx)
+		if shouldRetry {
+			lastErr = &APIError{Status: resp.StatusCode, Body: truncate(string(data), 512)}
 			sleep := retryAfter(resp) + backoff(attempt)
-			time.Sleep(sleep)
-			// Re-seek body for retry.
-			if br, ok := body.(*bytes.Reader); ok {
-				_, _ = br.Seek(0, io.SeekStart)
+			if err := sleepCtx(ctx, sleep); err != nil {
+				return err
 			}
 			continue
 		}
 		if resp.StatusCode >= 400 {
-			return &APIError{Status: resp.StatusCode, Body: string(data)}
+			return &APIError{Status: resp.StatusCode, Body: truncate(string(data), 512)}
 		}
 		if out != nil && len(data) > 0 {
 			if err := json.Unmarshal(data, out); err != nil {
@@ -295,6 +355,23 @@ func (c *Client) newRequest(ctx context.Context, method, endpoint string, body i
 	return req, nil
 }
 
+// sleepCtx blocks for d or until ctx is cancelled, whichever comes first.
+// A scheduled `sync` task must be able to stop promptly when launchd /
+// systemd / Task Scheduler tells it to.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func backoff(attempt int) time.Duration {
 	base := time.Duration(1<<attempt) * time.Second
 	if base > 10*time.Second {
@@ -303,13 +380,36 @@ func backoff(attempt int) time.Duration {
 	return base
 }
 
+// retryAfter parses the Retry-After header in either seconds or HTTP-date
+// form (both are permitted by RFC 7231). Unparseable values return 0 so
+// the caller's backoff still applies.
 func retryAfter(resp *http.Response) time.Duration {
-	if v := resp.Header.Get("Retry-After"); v != "" {
-		if s, err := strconv.Atoi(v); err == nil {
-			return time.Duration(s) * time.Second
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return 0
+	}
+	if s, err := strconv.Atoi(v); err == nil {
+		if s < 0 {
+			return 0
+		}
+		return time.Duration(s) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
 		}
 	}
 	return 0
+}
+
+// truncate caps s at n runes and appends a marker. Used on APIError.Body
+// so error logs don't splash potentially-tenant-identifying correlation
+// IDs across our journal.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...[truncated]"
 }
 
 // APIError is returned for non-2xx Graph responses.
