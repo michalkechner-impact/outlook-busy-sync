@@ -39,9 +39,13 @@ sync_pairs:
     to: work
 
 # Defaults apply to every pair unless overridden inline on a specific pair.
+# All fields are optional; omitted ones fall back to the hard-coded safe
+# defaults listed in the comments below. Set a field explicitly to change
+# behavior — including setting a boolean to `false` to opt INTO syncing
+# something the safe default excludes.
 defaults:
   lookback_days: 1        # sync source events starting at most N days ago
   lookahead_days: 30      # sync source events starting at most N days from now
   title: Busy             # subject written to mirrored events on the target side
-  skip_all_day: true      # ignore all-day events (vacations, OOO, focus days)
-  skip_declined: true     # ignore events you've declined on the source side
+  skip_all_day: true      # default: true (vacations/OOO don't leak). Set to `false` to include.
+  skip_declined: true     # default: true (declined meetings aren't your time). Set to `false` to include.
