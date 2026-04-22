@@ -138,6 +138,14 @@ Each invocation prints a short code and URL. Open the URL in any browser,
 sign in with the matching account, paste the code. Tokens are cached in
 your OS keychain and refreshed automatically from then on.
 
+> **Corporate tenants**: many enterprise M365 tenants are protected by
+> Conditional Access policies that require the sign-in to originate from
+> the corporate network or a compliant device. If `auth` fails with
+> `AADSTS50199`, `AADSTS53003`, or a "device is not compliant" message,
+> **connect to your company VPN first and retry**. For tenants where IT
+> pins the policy to a managed laptop specifically, see the troubleshooting
+> section below.
+
 ### 4. Run a sync
 
 ```sh
@@ -147,6 +155,16 @@ outlook-busy-sync sync
 You should see log lines showing created/updated/deleted counts per pair.
 Check both calendars - you should now see "Busy" blocks matching the other
 side's meetings.
+
+> **First run**: use `--dry-run` to preview every create/update/delete
+> without actually writing to Graph. Recommended before scheduling, and
+> whenever you change `skip_all_day` / `skip_declined` defaults (those
+> flips re-classify previously-synced events, which then get deleted on
+> the next real run).
+>
+> ```sh
+> outlook-busy-sync sync --dry-run
+> ```
 
 ### 5. Run it on a schedule
 
@@ -258,14 +276,20 @@ tenant has disabled user consent for the default Azure CLI client. Options:
 
 **`AADSTS50199`, `AADSTS53003`, or "device is not compliant".** Conditional
 Access policies in the tenant are blocking the device-code flow from a
-non-managed device. You'll need a workaround:
+non-managed device or from outside the corporate network.
 
-1. Ask IT to allow device-code flow for the app (`Calendars.ReadWrite`
-   scope), or
-2. Use your own Azure app registration on a device that satisfies CA
-   policies (usually a managed work laptop), or
-3. Accept that this tenant cannot be used with the tool until one of the
-   above is in place.
+Try in order:
+
+1. **Connect to corporate VPN and retry.** Many CA policies gate on
+   "trusted network location" and clear on VPN. This is the single most
+   common fix for consultants working from home or a coworking space.
+2. Ask IT to allow device-code flow for the app (`Calendars.ReadWrite`
+   scope), or grant tenant-wide consent for the Azure CLI client ID
+   (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`).
+3. Use your own Azure app registration on a device that satisfies CA
+   policies (usually a managed work laptop).
+4. If the policy pins to a specific managed device, accept that this
+   tenant cannot be used with the tool until one of the above is in place.
 
 **`ErrLoginRequired` during `sync`.** The access token for that account has
 been invalidated (password change, CA policy change, or the refresh token

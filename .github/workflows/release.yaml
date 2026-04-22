@@ -1,6 +1,9 @@
 # Safety note: this workflow does not consume any user-controlled text in
 # shell commands; the only template expansions are for `secrets.*`, which
 # are not attacker-controlled.
+#
+# Third-party actions are pinned to commit SHAs to prevent a tag-push
+# compromise from injecting code into release artefacts.
 name: release
 
 on:
@@ -14,26 +17,27 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
-          go-version: stable
+          go-version: '1.23.x'
           cache: true
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@9ed2f89a662bf1735a48bc8557fd212fa902bebf # v6.1.0
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.5.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # HOMEBREW_TAP_TOKEN is a PAT with `repo` scope on the
-          # homebrew-tap repository. Without it, the brew formula publish
-          # step is skipped but a GitHub Release is still produced.
+          # HOMEBREW_TAP_TOKEN is a fine-grained PAT scoped to the
+          # homebrew-tap repository only. Without it, the brew formula
+          # publish step is skipped but a GitHub Release is still
+          # produced.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # SCOOP_BUCKET_TOKEN is a PAT with `repo` scope on the
-          # scoop-bucket repository. Same fallback: without it the Scoop
-          # manifest publish is skipped but the GitHub Release still
-          # succeeds.
+          # SCOOP_BUCKET_TOKEN is a fine-grained PAT scoped to the
+          # scoop-bucket repository only. Same fallback: without it the
+          # Scoop manifest publish is skipped but the GitHub Release
+          # still succeeds.
           SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}

@@ -166,7 +166,8 @@ func loadCfg(g *globalOpts) (*config.Config, error) {
 
 // newSyncCmd runs all configured sync pairs once.
 func newSyncCmd(g *globalOpts) *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Run all configured sync pairs once",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -176,12 +177,15 @@ func newSyncCmd(g *globalOpts) *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 			defer cancel()
-			return runSync(ctx, cfg)
+			return runSync(ctx, cfg, dryRun)
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
+		"show what would be created/updated/deleted without making any Graph writes")
+	return cmd
 }
 
-func runSync(ctx context.Context, cfg *config.Config) error {
+func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 	// Build clients up front so we can report all missing auths in one go,
 	// rather than failing on the first pair the user happens to hit.
 	clients := syncpkg.Clients{}
@@ -203,13 +207,18 @@ func runSync(ctx context.Context, cfg *config.Config) error {
 		usedBy[p.To] = append(usedBy[p.To], fmt.Sprintf("%s→%s", p.From, p.To))
 	}
 
-	// Probe auth for each used account so we can report ALL missing accounts
-	// in one error rather than failing one pair at a time.
+	// Probe auth for each used account. `ErrLoginRequired` groups into a
+	// single "please re-auth" message; any other error (transport, MSAL
+	// invalid_grant, corrupted cache) is surfaced per-account so the user
+	// actually sees the root cause instead of a downstream Graph 401.
 	var missing []string
+	var probeErrors []error
 	for accName := range usedBy {
 		if _, err := authenticators[accName].Token(ctx); err != nil {
 			if errors.Is(err, auth.ErrLoginRequired) {
 				missing = append(missing, accName)
+			} else {
+				probeErrors = append(probeErrors, fmt.Errorf("%s: %w", accName, err))
 			}
 		}
 	}
@@ -222,21 +231,25 @@ func runSync(ctx context.Context, cfg *config.Config) error {
 		return coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
 			len(missing), strings.Join(lines, "\n")))
 	}
+	if len(probeErrors) > 0 {
+		return coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
+	}
 
 	engine := syncpkg.New(clients, slog.Default())
-	var failed bool
+	var pairErrors []error
 	for _, p := range cfg.SyncPairs {
 		resolved := p.Resolved(cfg.Defaults)
+		resolved.DryRun = dryRun
 		if _, err := engine.RunPair(ctx, resolved); err != nil {
 			slog.Error("sync pair failed",
 				slog.String("from", resolved.From),
 				slog.String("to", resolved.To),
 				slog.String("err", err.Error()))
-			failed = true
+			pairErrors = append(pairErrors, fmt.Errorf("%s→%s: %w", resolved.From, resolved.To, err))
 		}
 	}
-	if failed {
-		return coded(ExitError, errors.New("one or more sync pairs failed - see logs"))
+	if len(pairErrors) > 0 {
+		return coded(ExitError, fmt.Errorf("%d sync pair(s) failed: %w", len(pairErrors), errors.Join(pairErrors...)))
 	}
 	return nil
 }
@@ -320,7 +333,11 @@ func newStatusCmd(g *globalOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
+			// Bound per-account probes so `status` cannot hang on a slow
+			// authority endpoint or a locked keychain prompt. The user
+			// running `status` wants a fast diagnosis, not a 30s wait.
+			rootCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
 			for _, acc := range cfg.Accounts {
 				resolved := *cfg.Account(acc.Name)
 				a, err := auth.New(resolved)
@@ -328,11 +345,17 @@ func newStatusCmd(g *globalOpts) *cobra.Command {
 					fmt.Printf("  %s\t(%s)\tERROR: %v\n", acc.Name, acc.Email, err)
 					continue
 				}
-				if _, err := a.Token(ctx); err != nil {
+				probeCtx, probeCancel := context.WithTimeout(rootCtx, 5*time.Second)
+				_, err = a.Token(probeCtx)
+				probeCancel()
+				switch {
+				case err == nil:
+					fmt.Printf("  %s\t(%s)\tlogged in\n", acc.Name, acc.Email)
+				case errors.Is(err, auth.ErrLoginRequired):
 					fmt.Printf("  %s\t(%s)\tNOT LOGGED IN (run: outlook-busy-sync auth %s)\n", acc.Name, acc.Email, acc.Name)
-					continue
+				default:
+					fmt.Printf("  %s\t(%s)\tAUTH ERROR: %v\n", acc.Name, acc.Email, err)
 				}
-				fmt.Printf("  %s\t(%s)\tlogged in\n", acc.Name, acc.Email)
 			}
 			fmt.Println()
 			fmt.Println("Sync pairs:")

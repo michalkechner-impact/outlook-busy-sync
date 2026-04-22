@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `sync --dry-run` flag: preview every create/update/delete without
+  making any Graph writes. Strongly recommended before the first
+  scheduled run and after toggling `skip_all_day` / `skip_declined`.
+- CI `vulncheck` job running `govulncheck` on every push.
+- Full test coverage for the `auth` and `cli` packages (previously at
+  zero); new test cases covering pagination with `SourceRef`
+  preservation, empty sync windows, recurring-instance handling,
+  timezone-aware shape equality, and partial-failure propagation.
+
+### Changed
+- `sync_pairs[].skip_all_day` / `skip_declined` at the `defaults:` level
+  are now honoured when set explicitly to `false`. Previously the safe
+  defaults were force-applied over any top-level setting, silently
+  overriding user configuration.
+- `sync` now exits non-zero when any individual event op fails, so
+  launchd/systemd/Task Scheduler can alert on partial failures.
+  Previously a pair with dozens of failed `CreateEvent` calls could
+  still report success to the scheduler.
+- Graph retry loop respects `ctx.Done()` during backoff and
+  `Retry-After` waits. Scheduled tasks can now be stopped cleanly.
+- Writes (`POST`/`PATCH`) are no longer retried on 5xx responses. Only
+  explicit 429 throttling triggers a retry for non-idempotent methods,
+  preventing duplicate busy blocks when the server committed the write
+  before returning an error.
+- `parseGraphTime` returns an error instead of `time.Time{}` on
+  unparseable input, so malformed Graph responses can no longer produce
+  year-0001 busy blocks that self-perpetuate.
+- `ListEvents` uses `$top=25` when `$expand`ing extended properties, to
+  avoid documented Graph quirks that can silently drop events from
+  paginated responses.
+- Token-cache file writes are atomic (temp + rename) and mode 0600 is
+  enforced on every POSIX platform, not just darwin.
+- Token-cache keyring / file selection uses a probe with cleanup, and
+  `preferFile` is pinned for the process lifetime so `load()` and
+  `save()` cannot disagree about where the cache lives.
+- `tenant_id` and `client_id` are validated as UUIDs (or
+  `common`/`organizations`/`consumers` literals for tenant), closing
+  off a config-injection surface on the MSAL authority URL.
+- `APIError.Body` is truncated to 512 bytes in error messages so logs
+  don't splash tenant-identifying correlation IDs.
+- `status` uses bounded per-account timeouts and distinguishes a
+  network/keychain error from "not logged in".
+- GitHub Actions pinned to commit SHAs across both workflows. Go
+  toolchain pinned to `1.23.x`.
+- YAML parser migrated from the unmaintained `gopkg.in/yaml.v3` to
+  `go.yaml.in/yaml/v3`.
+- `github.com/google/uuid` bumped to `v1.6.0`.
+
+### Fixed
+- `Defaults{}` omitted fields no longer leak to resolved pairs; the
+  pointer-bool / pointer-int representation correctly distinguishes
+  "unset" from "explicit zero value".
+- Error messages from `sync_pairs` validation are deterministic
+  (sorted known-account list).
+
 ## [0.1.0] - 2026-04-23
 
 First public release.
