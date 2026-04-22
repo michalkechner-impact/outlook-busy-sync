@@ -113,21 +113,21 @@ func (t tokenStore) save(data []byte) error {
 	// When the keyring is usable, attempt keyring first. On success we
 	// also remove any stale file copy so the on-disk cache doesn't drift.
 	if !t.preferFile {
-		if err := keyring.Set(keyringService, t.account, string(data)); err == nil {
+		err := keyring.Set(keyringService, t.account, string(data))
+		if err == nil {
 			if rmErr := os.Remove(t.filePath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 				slog.Warn("keyring save ok but stale file not removed",
 					slog.String("path", t.filePath),
 					slog.String("err", rmErr.Error()))
 			}
 			return nil
-		} else {
-			// Log-and-fallthrough. Common on macOS when the cache grows
-			// past the generic-password size limit; the file fallback is
-			// specifically designed for this.
-			slog.Debug("keyring save failed, falling back to file",
-				slog.String("account", t.account),
-				slog.String("err", err.Error()))
 		}
+		// Log-and-fallthrough. Common on macOS when the cache grows past
+		// the generic-password size limit; the file fallback is
+		// specifically designed for this.
+		slog.Debug("keyring save failed, falling back to file",
+			slog.String("account", t.account),
+			slog.String("err", err.Error()))
 	}
 	return writeFileAtomic(t.filePath, data, 0o600)
 }
