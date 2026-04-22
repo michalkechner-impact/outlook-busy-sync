@@ -168,10 +168,16 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 
 func (t tokenStore) clear() error {
 	var errs []error
-	if err := keyring.Delete(keyringService, t.account); err != nil &&
-		!errors.Is(err, keyring.ErrNotFound) &&
-		!errors.Is(err, keyring.ErrUnsupportedPlatform) {
-		errs = append(errs, fmt.Errorf("keyring delete: %w", err))
+	// Skip the keyring delete entirely when we've already decided the
+	// keyring is unusable at construction. This avoids noise on headless
+	// Linux CI where go-keyring returns a DBus "service not provided"
+	// error rather than ErrUnsupportedPlatform.
+	if !t.preferFile {
+		if err := keyring.Delete(keyringService, t.account); err != nil &&
+			!errors.Is(err, keyring.ErrNotFound) &&
+			!errors.Is(err, keyring.ErrUnsupportedPlatform) {
+			errs = append(errs, fmt.Errorf("keyring delete: %w", err))
+		}
 	}
 	if err := os.Remove(t.filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		errs = append(errs, fmt.Errorf("file remove: %w", err))

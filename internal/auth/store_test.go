@@ -129,12 +129,16 @@ func TestTokenStore_clearRemovesFile(t *testing.T) {
 }
 
 func TestConfigDir_honoursXDG(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg")
+	// Use filepath.Join so Windows's \ separator is accepted. The point
+	// of the test is that XDG_CONFIG_HOME is respected; the separator
+	// convention is the platform's to choose.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
 	dir, err := configDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dir != "/custom/xdg/outlook-busy-sync" {
-		t.Errorf("XDG path: %s", dir)
+	want := filepath.Join("custom", "xdg", "outlook-busy-sync")
+	if dir != want {
+		t.Errorf("XDG path: got %q want %q", dir, want)
 	}
 }

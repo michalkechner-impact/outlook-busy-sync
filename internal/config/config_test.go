@@ -241,8 +241,10 @@ func TestSyncPair_Resolved(t *testing.T) {
 }
 
 func TestDefaultPath_XDG(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg")
-	if got := DefaultPath(); got != "/custom/xdg/outlook-busy-sync/config.yaml" {
-		t.Errorf("XDG path not honoured: %s", got)
+	// filepath.Join for platform-neutral separators (Windows uses \).
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
+	want := filepath.Join("custom", "xdg", "outlook-busy-sync", "config.yaml")
+	if got := DefaultPath(); got != want {
+		t.Errorf("XDG path not honoured: got %q want %q", got, want)
 	}
 }
