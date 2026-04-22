@@ -1,0 +1,87 @@
+# Safety note: this workflow does not consume any user-controlled text
+# (issue titles, PR bodies, commit messages, branch names, etc.) in shell
+# commands. The only `${{ ... }}` expansions are `matrix.*` values we
+# define ourselves and `runner.os`, so the command-injection class at
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+# does not apply here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Test
+        # `go test -race` works everywhere, but we skip it on Windows to
+        # keep CI fast and match the release build flags (CGO-less).
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go test -coverprofile=coverage.txt -covermode=atomic ./...
+          else
+            go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.txt
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          # Pin to v2.x: the repo's .golangci.yaml uses the v2 config
+          # schema (`version: "2"`), which v1 refuses to parse.
+          # Action v8 is the first line that supports linter v2.
+          version: v2.11.4
+
+  build-matrix:
+    # Smoke-test that the binary compiles for every target we ship in
+    # .goreleaser.yaml, so we catch platform-specific regressions without
+    # running the full release pipeline on every PR.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -o /tmp/out ./cmd/outlook-busy-sync

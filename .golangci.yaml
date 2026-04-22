@@ -1,0 +1,50 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - misspell
+    - revive
+  settings:
+    revive:
+      # Enable only the rules we care about. Default revive pulls in some
+      # noisy rules (unused-parameter, package-comments) that fire on
+      # interface-mandated parameters and are not useful signal for this
+      # codebase.
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          arguments:
+            - "disableStutteringCheck"
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: _test\.go
+        text: "should have comment or be unexported"

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent template for running `outlook-busy-sync sync` every 15 minutes.
+
+  Install:
+    1. Replace REPLACE_WITH_HOME with your actual $HOME path.
+    2. Copy to ~/Library/LaunchAgents/com.user.outlook-busy-sync.plist
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.outlook-busy-sync.plist
+    4. tail -f ~/Library/Logs/outlook-busy-sync.log to watch runs.
+
+  Uninstall:
+    launchctl bootout gui/$(id -u)/com.user.outlook-busy-sync
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.outlook-busy-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/outlook-busy-sync</string>
+        <string>sync</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>900</integer> <!-- 15 minutes -->
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/outlook-busy-sync.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/outlook-busy-sync.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>REPLACE_WITH_HOME</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

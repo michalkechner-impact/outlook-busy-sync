@@ -1,0 +1,23 @@
+# Build artifacts
+/dist/
+/bin/
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Local config and tokens
+/config.yaml
+/config.yml
+/tokens/
+*.token
+*.cache
+
+# OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go
+vendor/

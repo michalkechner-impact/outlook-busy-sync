@@ -1,0 +1,94 @@
+version: 2
+
+project_name: outlook-busy-sync
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: outlook-busy-sync
+    main: ./cmd/outlook-busy-sync
+    binary: outlook-busy-sync
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 works, but the go-keyring dep links against the
+      # Windows Credential Manager via cgo-less syscalls that are exercised
+      # far less on arm64. Leave it out of the first release and add back
+      # once someone actually requests it.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X github.com/michalkechner-impact/outlook-busy-sync/internal/version.Version={{.Version}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - examples/config.yaml
+      - examples/scheduler/**/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Other
+      order: 999
+
+brews:
+  - name: outlook-busy-sync
+    homepage: https://github.com/michalkechner-impact/outlook-busy-sync
+    description: Mirror busy blocks between two Microsoft 365 calendars
+    license: MIT
+    repository:
+      owner: michalkechner-impact
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    install: |
+      bin.install "outlook-busy-sync"
+    test: |
+      system "#{bin}/outlook-busy-sync", "--version"
+
+# Scoop bucket for Windows users. Skipped silently if SCOOP_BUCKET_TOKEN is
+# not set, so the release still succeeds on first push.
+scoops:
+  - name: outlook-busy-sync
+    homepage: https://github.com/michalkechner-impact/outlook-busy-sync
+    description: Mirror busy blocks between two Microsoft 365 calendars
+    license: MIT
+    repository:
+      owner: michalkechner-impact
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+      branch: main
+    skip_upload: auto

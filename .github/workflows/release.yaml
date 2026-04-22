@@ -1,0 +1,39 @@
+# Safety note: this workflow does not consume any user-controlled text in
+# shell commands; the only template expansions are for `secrets.*`, which
+# are not attacker-controlled.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # HOMEBREW_TAP_TOKEN is a PAT with `repo` scope on the
+          # homebrew-tap repository. Without it, the brew formula publish
+          # step is skipped but a GitHub Release is still produced.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # SCOOP_BUCKET_TOKEN is a PAT with `repo` scope on the
+          # scoop-bucket repository. Same fallback: without it the Scoop
+          # manifest publish is skipped but the GitHub Release still
+          # succeeds.
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}

@@ -1,0 +1,47 @@
+# outlook-busy-sync example config.
+#
+# Copy to the right location for your platform, then edit the placeholders.
+#   macOS / Linux (XDG):  ~/.config/outlook-busy-sync/config.yaml
+#                         or  $XDG_CONFIG_HOME/outlook-busy-sync/config.yaml
+#   Windows:              %APPDATA%\outlook-busy-sync\config.yaml
+#                         (run `outlook-busy-sync config path` to confirm)
+#
+# Each `accounts` entry corresponds to one Microsoft 365 mailbox you want to
+# sync. `tenant_id` is the directory (tenant) UUID of that mailbox. To find it:
+#   - sign in to https://portal.azure.com with the account; the tenant UUID is
+#     shown in the account panel (top-right), or under "Microsoft Entra ID".
+#   - if you can't reach the portal, use the literal string "common" and MSAL
+#     will resolve the real tenant during login.
+#
+# The tool uses the Azure CLI public client ID by default. That client is
+# pre-consented for Microsoft Graph in almost every M365 tenant, so you do NOT
+# need to register your own Azure app or involve IT. If your tenant restricts
+# first-party consents (you'll see AADSTS50020 or similar on `auth`), override
+# `client_id` with one you registered yourself (Azure AD -> App registrations
+# -> New registration: "Mobile and desktop applications", redirect
+# `http://localhost`, delegated permission `Calendars.ReadWrite`).
+
+accounts:
+  - name: work            # arbitrary local label - used in sync_pairs + `auth` command
+    email: you@company-a.example
+    tenant_id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+
+  - name: client          # second tenant (different employer, contract, etc.)
+    email: ext-you@company-b.example
+    tenant_id: 11111111-2222-3333-4444-555555555555
+
+# Sync pairs are one-way copies. List two entries for bidirectional sync so
+# both sides see each other's busy blocks.
+sync_pairs:
+  - from: work
+    to: client
+  - from: client
+    to: work
+
+# Defaults apply to every pair unless overridden inline on a specific pair.
+defaults:
+  lookback_days: 1        # sync source events starting at most N days ago
+  lookahead_days: 30      # sync source events starting at most N days from now
+  title: Busy             # subject written to mirrored events on the target side
+  skip_all_day: true      # ignore all-day events (vacations, OOO, focus days)
+  skip_declined: true     # ignore events you've declined on the source side

@@ -1,0 +1,15 @@
+[Unit]
+Description=Run outlook-busy-sync every 15 minutes
+Documentation=https://github.com/michalkechner-impact/outlook-busy-sync
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+# Randomize by up to 60s so many laptops running this on an event don't
+# hammer Graph at the same wall-clock time.
+RandomizedDelaySec=60s
+Persistent=true
+Unit=outlook-busy-sync.service
+
+[Install]
+WantedBy=timers.target

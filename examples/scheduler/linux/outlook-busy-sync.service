@@ -1,0 +1,22 @@
+[Unit]
+Description=outlook-busy-sync: mirror M365 busy blocks between calendars
+Documentation=https://github.com/michalkechner-impact/outlook-busy-sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/outlook-busy-sync sync
+# If installed from the release tarball to /usr/local/bin, change the path
+# above. systemd does not expand $PATH in ExecStart.
+
+# Hardening: this is a oneshot that only needs outbound HTTPS and its own
+# token cache. Everything else can be locked down.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/outlook-busy-sync
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
