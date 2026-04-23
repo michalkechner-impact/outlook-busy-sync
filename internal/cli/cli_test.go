@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/auth"
@@ -67,8 +68,10 @@ func TestInit_scaffoldsConfigAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config not written: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("config must be 0600, got %o", info.Mode().Perm())
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		// Windows does not honour POSIX permission bits; ACL inheritance
+		// from the config directory is the Windows-side protection.
+		t.Errorf("config must be 0600 on POSIX, got %o", info.Mode().Perm())
 	}
 
 	// The scaffolded file must be loadable by the config package.
