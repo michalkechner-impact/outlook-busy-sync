@@ -1,0 +1,28 @@
+# Keep Go dependencies and pinned GitHub Actions current. Security
+# updates arrive independently via the repo's Dependabot alerts; these
+# are routine version bumps.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - go
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps(ci)
+      include: scope
+    labels:
+      - dependencies
+      - github-actions

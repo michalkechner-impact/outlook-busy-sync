@@ -1,0 +1,50 @@
+# CodeQL analysis. Free for public repositories. Complements the
+# govulncheck job (which catches known stdlib/dep CVEs) by running
+# semantic analysis over the project's own code — OAuth, HTTP, and
+# file-handling code are the things most worth static analysis here.
+#
+# Safety: this workflow does not consume any user-controlled text
+# (issue titles, PR bodies, commit messages, branch names) in shell
+# commands. Only `${{ matrix.language }}` is expanded, and that value
+# is a hard-coded matrix entry we control. The injection pattern at
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+# does not apply.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 06:00 UTC. The schedule keeps analysis fresh when
+    # a month passes without commits and new CodeQL queries land.
+    - cron: "0 6 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze Go
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - uses: github/codeql-action/init@46e53ea9b4aaece2ca70cd810d8e14b38b876f6f # v3.29.8
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - uses: github/codeql-action/autobuild@46e53ea9b4aaece2ca70cd810d8e14b38b876f6f # v3.29.8
+      - uses: github/codeql-action/analyze@46e53ea9b4aaece2ca70cd810d8e14b38b876f6f # v3.29.8
+        with:
+          category: "/language:${{ matrix.language }}"
