@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -241,10 +242,26 @@ func TestSyncPair_Resolved(t *testing.T) {
 }
 
 func TestDefaultPath_XDG(t *testing.T) {
-	// filepath.Join for platform-neutral separators (Windows uses \).
+	if runtime.GOOS == "windows" {
+		// On Windows the XDG var is ignored in favour of %APPDATA%.
+		// Covered by TestDefaultPath_Windows below.
+		t.Skip("Windows uses APPDATA, not XDG")
+	}
+	// filepath.Join for platform-neutral separators.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
 	want := filepath.Join("custom", "xdg", "outlook-busy-sync", "config.yaml")
 	if got := DefaultPath(); got != want {
 		t.Errorf("XDG path not honoured: got %q want %q", got, want)
+	}
+}
+
+func TestDefaultPath_Windows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: %APPDATA% is not consulted on other OSes")
+	}
+	t.Setenv("APPDATA", `C:\Users\test\AppData\Roaming`)
+	want := filepath.Join(`C:\Users\test\AppData\Roaming`, "outlook-busy-sync", "config.yaml")
+	if got := DefaultPath(); got != want {
+		t.Errorf("APPDATA not honoured on Windows: got %q want %q", got, want)
 	}
 }

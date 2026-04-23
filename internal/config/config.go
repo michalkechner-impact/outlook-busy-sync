@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -122,12 +123,32 @@ type ResolvedPair struct {
 }
 
 // DefaultPath returns the platform-appropriate default config path.
+//
+// Windows uses %APPDATA%\outlook-busy-sync\config.yaml, matching the
+// idiomatic location for per-user application data on that platform.
+// Other OSes keep the XDG convention (~/.config/outlook-busy-sync/
+// or $XDG_CONFIG_HOME/outlook-busy-sync/) that v0.1.0 / v0.2.0 shipped
+// with — changing it would orphan existing configs for macOS and
+// Linux users.
 func DefaultPath() string {
+	return filepath.Join(defaultConfigDir(), "config.yaml")
+}
+
+// defaultConfigDir picks the per-user application-data directory for
+// this tool, without the trailing filename.
+func defaultConfigDir() string {
+	if runtime.GOOS == "windows" {
+		if appdata := os.Getenv("APPDATA"); appdata != "" {
+			return filepath.Join(appdata, "outlook-busy-sync")
+		}
+		// Fall through to home-based path if APPDATA isn't set (rare but
+		// happens in stripped CI containers running under Wine etc.).
+	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "outlook-busy-sync", "config.yaml")
+		return filepath.Join(xdg, "outlook-busy-sync")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "outlook-busy-sync", "config.yaml")
+	return filepath.Join(home, ".config", "outlook-busy-sync")
 }
 
 // Load parses and validates the config file at path. If path is empty,

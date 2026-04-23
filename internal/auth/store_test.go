@@ -129,9 +129,9 @@ func TestTokenStore_clearRemovesFile(t *testing.T) {
 }
 
 func TestConfigDir_honoursXDG(t *testing.T) {
-	// Use filepath.Join so Windows's \ separator is accepted. The point
-	// of the test is that XDG_CONFIG_HOME is respected; the separator
-	// convention is the platform's to choose.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses APPDATA, not XDG")
+	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
 	dir, err := configDir()
 	if err != nil {
@@ -140,5 +140,23 @@ func TestConfigDir_honoursXDG(t *testing.T) {
 	want := filepath.Join("custom", "xdg", "outlook-busy-sync")
 	if dir != want {
 		t.Errorf("XDG path: got %q want %q", dir, want)
+	}
+}
+
+func TestConfigDir_honoursAPPDATAOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only")
+	}
+	t.Setenv("APPDATA", `C:\Users\test\AppData\Roaming`)
+	// XDG must be ignored on Windows even if set (some devs leave it in
+	// their env from WSL).
+	t.Setenv("XDG_CONFIG_HOME", `C:\should\not\be\used`)
+	dir, err := configDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(`C:\Users\test\AppData\Roaming`, "outlook-busy-sync")
+	if dir != want {
+		t.Errorf("APPDATA path: got %q want %q", dir, want)
 	}
 }

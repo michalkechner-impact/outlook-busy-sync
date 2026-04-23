@@ -76,6 +76,15 @@ func newTokenStore(account string) (tokenStore, error) {
 }
 
 func configDir() (string, error) {
+	// Windows uses %APPDATA%\outlook-busy-sync; other OSes keep the XDG
+	// convention shipped since v0.1.0. Changing the non-Windows path
+	// would orphan existing tokens for current users.
+	if runtime.GOOS == "windows" {
+		if appdata := os.Getenv("APPDATA"); appdata != "" {
+			return filepath.Join(appdata, "outlook-busy-sync"), nil
+		}
+		// Fall through to HOME-based path if APPDATA is unset (rare).
+	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "outlook-busy-sync"), nil
 	}

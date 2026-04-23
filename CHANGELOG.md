@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-23
+
+### Fixed
+- Config and token-cache paths on Windows now live under
+  `%APPDATA%\outlook-busy-sync\` instead of the XDG-style
+  `~/.config/outlook-busy-sync/` that accidentally leaked over from
+  POSIX. The README already documented `%APPDATA%` as the Windows
+  path, but v0.1.0 / v0.2.0 code didn't honour it. macOS and Linux
+  paths are unchanged (backward compatible).
+
 ## [0.2.0] - 2026-04-23
 
 Onboarding + distribution polish. No breaking changes.
@@ -114,6 +124,7 @@ First public release.
 - YAML parser is `go.yaml.in/yaml/v3` (maintained fork of the
   archived `gopkg.in/yaml.v3`).
 
-[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/michalkechner-impact/outlook-busy-sync/releases/tag/v0.1.0
