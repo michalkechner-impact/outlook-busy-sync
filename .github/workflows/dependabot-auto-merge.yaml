@@ -1,0 +1,69 @@
+# Auto-merge safe Dependabot PRs. Policy:
+#
+#   - GitHub Actions bumps: auto-merge any update (patch/minor/major).
+#     Actions are pinned by SHA in this repo, so a bad bump fails CI
+#     visibly — the blast radius is a broken build, not a broken
+#     release.
+#   - Go module bumps: auto-merge patch + minor only. Major bumps
+#     require manual review because they often carry breaking API
+#     changes; those get labelled for human attention instead.
+#
+# All auto-merged PRs still wait for CI (branch protection on main
+# lists the required status checks). If CI fails, auto-merge is
+# cancelled and the PR stays open for a human.
+#
+# Safety: this workflow does not consume user-controlled text (PR
+# title, body, branch name, commit messages) in shell commands. The
+# only expansions reaching shell are:
+#   - step outputs from dependabot/fetch-metadata (a trusted
+#     first-party action whose outputs are fixed enumerations like
+#     'gomod' / 'github_actions' and semver classifiers)
+#   - the PR URL, passed via env var and quoted when consumed by gh
+# The injection class at
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+# does not apply.
+name: dependabot-auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-approve + auto-merge (actions, any update)
+        if: steps.meta.outputs.package-ecosystem == 'github_actions'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
+
+      - name: Auto-approve + auto-merge (go modules, patch/minor only)
+        if: steps.meta.outputs.package-ecosystem == 'gomod' && steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
+
+      - name: Label major go bumps for manual review
+        if: steps.meta.outputs.package-ecosystem == 'gomod' && steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr edit "$PR_URL" --add-label "needs-manual-review"
