@@ -3,9 +3,12 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/auth"
+	"github.com/michalkechner-impact/outlook-busy-sync/internal/config"
 )
 
 // Scheduled runners (launchd, systemd, Task Scheduler) key off these exit
@@ -35,7 +38,7 @@ func TestExitCode_mapping(t *testing.T) {
 
 func TestNewRoot_hasExpectedSubcommands(t *testing.T) {
 	cmd := NewRoot()
-	want := map[string]bool{"auth": false, "sync": false, "config": false, "status": false, "events": false}
+	want := map[string]bool{"auth": false, "sync": false, "config": false, "status": false, "events": false, "init": false}
 	for _, sub := range cmd.Commands() {
 		if _, ok := want[sub.Name()]; ok {
 			want[sub.Name()] = true
@@ -45,6 +48,48 @@ func TestNewRoot_hasExpectedSubcommands(t *testing.T) {
 		if !found {
 			t.Errorf("subcommand %q missing from root", name)
 		}
+	}
+}
+
+func TestInit_scaffoldsConfigAndIsIdempotent(t *testing.T) {
+	// First-time install UX: `init` must write a valid starter config
+	// to a custom path and, on a second invocation, refuse to overwrite
+	// so a user re-running it by mistake doesn't nuke their work.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	g := &globalOpts{configPath: path}
+	cmd := newInitCmd(g)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("first init failed: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("config must be 0600, got %o", info.Mode().Perm())
+	}
+
+	// The scaffolded file must be loadable by the config package.
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("scaffolded config does not pass validation: %v", err)
+	}
+	if len(cfg.Accounts) != 2 || len(cfg.SyncPairs) != 2 {
+		t.Errorf("scaffold should have 2 accounts and 2 pairs, got %d/%d", len(cfg.Accounts), len(cfg.SyncPairs))
+	}
+
+	// Tamper the file, then re-run: it must NOT be overwritten.
+	if err := os.WriteFile(path, []byte("# user-edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("idempotent init failed: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "# user-edited\n" {
+		t.Error("second init overwrote existing config - must be idempotent")
 	}
 }
 

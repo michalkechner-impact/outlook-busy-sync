@@ -10,6 +10,44 @@ cloud, no admin consent required in most tenants.
 Supported platforms: **macOS, Linux, Windows** (amd64 + arm64 where
 applicable). Single static Go binary, no runtime dependencies.
 
+![Outlook week view with busy blocks synced across tenants](docs/images/screenshot-calendar.png)
+
+## TL;DR — zero to syncing in 60 seconds
+
+```sh
+# 1. install (macOS; see Install section below for Linux/Windows)
+brew install michalkechner-impact/tap/outlook-busy-sync
+
+# 2. scaffold a starter config
+outlook-busy-sync init
+
+# 3. edit ~/.config/outlook-busy-sync/config.yaml
+#    - replace the two `email:` addresses
+#    - (optional) rename `work` / `client` to whatever labels you like
+#    - tenant_id stays `common` unless you know your tenant UUID
+
+# 4. log in to each account (device-code flow, takes ~30s each)
+outlook-busy-sync auth work
+outlook-busy-sync auth client
+
+# 5. preview before the first real run
+outlook-busy-sync sync --dry-run
+
+# 6. go live
+outlook-busy-sync sync
+
+# 7. keep it running every 15 minutes — see examples/scheduler/
+```
+
+> **Corporate tenant?** If `auth` fails with `AADSTS5019x` or "device not
+> compliant", connect to the corporate VPN and retry. Most CA policies
+> gate on trusted network location and clear once you're on the VPN.
+>
+> **Adding a third tenant (or more)?** Append another entry to
+> `accounts:` and one `from`/`to` pair for each direction you want
+> mirrored. The engine scales to N tenants - it just runs the pairs
+> sequentially.
+
 ## Why this exists
 
 Microsoft Exchange free/busy lookups are strictly per-tenant. When a
@@ -101,25 +139,29 @@ go install github.com/michalkechner-impact/outlook-busy-sync/cmd/outlook-busy-sy
 
 ### 1. Create config
 
-Find your config path and write a starter file:
-
 ```sh
-outlook-busy-sync config path
+outlook-busy-sync init
 ```
+
+`init` writes a minimal starter config to the platform-default path and
+prints what to do next. If a config already exists it leaves the file
+alone. You can show the path at any time with `outlook-busy-sync config
+path`:
 
 | OS            | Default path                                                           |
 |---------------|------------------------------------------------------------------------|
 | macOS / Linux | `~/.config/outlook-busy-sync/config.yaml` (or `$XDG_CONFIG_HOME/...`)  |
 | Windows       | `%APPDATA%\outlook-busy-sync\config.yaml`                              |
 
-Copy [`examples/config.yaml`](examples/config.yaml) to that path and edit
-the placeholders (account names, emails, tenant UUIDs).
+Open the file in your editor and edit the placeholders (account names,
+emails). `tenant_id` is pre-filled with `common`, which works in the
+majority of M365 setups without you looking up UUIDs - MSAL resolves the
+real tenant during the device-code login. You can pin it to a specific
+tenant UUID later if you need to.
 
-**Finding your tenant UUID**: sign in to the account at
-`https://portal.azure.com` and read it from the top-right profile panel, or
-from the address bar after clicking "Microsoft Entra ID". If you cannot
-sign in to the portal, use the literal string `common` as `tenant_id`; MSAL
-will resolve the actual tenant during login.
+**Finding your tenant UUID (optional)**: sign in to the account at
+`https://portal.azure.com` and read it from the top-right profile panel,
+or from the address bar after clicking "Microsoft Entra ID".
 
 ### 2. Validate the config
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -90,8 +91,91 @@ func NewRoot() *cobra.Command {
 	cmd.AddCommand(newConfigCmd(&g))
 	cmd.AddCommand(newStatusCmd(&g))
 	cmd.AddCommand(newEventsCmd(&g))
+	cmd.AddCommand(newInitCmd(&g))
 	return cmd
 }
+
+// newInitCmd scaffolds a config file at the user's default path so a
+// first-time install is three commands (brew install, init, auth) instead
+// of "go figure out where the config goes, go find the example, edit
+// YAML blindly". Idempotent: if a config already exists it prints its
+// path and exits 0 without touching the file.
+func newInitCmd(g *globalOpts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Scaffold a starter config at the default path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := g.configPath
+			if path == "" {
+				path = config.DefaultPath()
+			}
+			if _, err := os.Stat(path); err == nil {
+				fmt.Fprintf(os.Stderr, "config already exists: %s (leaving it alone)\n", path)
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return coded(ExitError, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return coded(ExitError, fmt.Errorf("create config dir: %w", err))
+			}
+			if err := os.WriteFile(path, []byte(starterConfig), 0o600); err != nil {
+				return coded(ExitError, fmt.Errorf("write config: %w", err))
+			}
+			fmt.Fprintf(os.Stderr, "wrote starter config to %s\n", path)
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "next steps:")
+			fmt.Fprintf(os.Stderr, "  1. edit %s - replace the 'work' / 'client' account names\n", path)
+			fmt.Fprintln(os.Stderr, "     and emails. tenant_id can stay as 'common' unless you")
+			fmt.Fprintln(os.Stderr, "     know your tenant UUID; MSAL will resolve it at login.")
+			fmt.Fprintln(os.Stderr, "  2. outlook-busy-sync auth work")
+			fmt.Fprintln(os.Stderr, "  3. outlook-busy-sync auth client")
+			fmt.Fprintln(os.Stderr, "  4. outlook-busy-sync sync --dry-run   (preview)")
+			fmt.Fprintln(os.Stderr, "  5. outlook-busy-sync sync              (go live)")
+			return nil
+		},
+	}
+}
+
+// starterConfig is the minimal bootstrap YAML init writes. tenant_id is
+// set to "common" so users don't have to find UUIDs before their first
+// login - MSAL resolves the real tenant during the device-code flow.
+const starterConfig = `# outlook-busy-sync starter config.
+#
+# Written by ` + "`outlook-busy-sync init`" + `. Edit the two accounts
+# below, then run ` + "`outlook-busy-sync auth work`" + ` and
+# ` + "`outlook-busy-sync auth client`" + `.
+#
+# tenant_id: "common" asks MSAL to resolve your actual tenant at login
+# time, which works in the vast majority of M365 setups without you
+# looking up UUIDs. You can replace it with your directory UUID later
+# if you want to pin authentication to a specific tenant.
+
+accounts:
+  - name: work
+    email: you@company-a.example
+    tenant_id: common
+
+  - name: client
+    email: you@company-b.example
+    tenant_id: common
+
+# Bidirectional sync: two one-way pairs with swapped endpoints.
+sync_pairs:
+  - from: work
+    to: client
+  - from: client
+    to: work
+
+# Defaults apply to every pair unless overridden inline. Safe defaults
+# exclude all-day events (vacations, OOO) and declined invites so your
+# first run does not leak private patterns to the other tenant.
+defaults:
+  lookback_days: 1
+  lookahead_days: 30
+  title: Busy
+  skip_all_day: true
+  skip_declined: true
+`
 
 // newEventsCmd is a diagnostic that lists upcoming events for one account.
 // Useful for confirming that auth and Graph access actually work without
