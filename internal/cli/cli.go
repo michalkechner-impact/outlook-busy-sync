@@ -87,12 +87,52 @@ func NewRoot() *cobra.Command {
 	}
 
 	cmd.AddCommand(newAuthCmd(&g))
+	cmd.AddCommand(newLogoutCmd(&g))
 	cmd.AddCommand(newSyncCmd(&g))
 	cmd.AddCommand(newConfigCmd(&g))
 	cmd.AddCommand(newStatusCmd(&g))
 	cmd.AddCommand(newEventsCmd(&g))
 	cmd.AddCommand(newInitCmd(&g))
 	return cmd
+}
+
+// newLogoutCmd clears cached tokens for a single account locally. The
+// Graph-side refresh token remains valid until the tenant's configured
+// sliding lifetime expires; to force hard revocation the user (or an
+// admin) must invalidate the session via Entra ID. This is called out
+// in `--help` so users aren't surprised.
+func newLogoutCmd(g *globalOpts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout <account>",
+		Short: "Clear cached credentials for one account",
+		Long: `Clear the cached refresh token for an account from the platform
+keyring and the 0600 file fallback.
+
+The refresh token itself remains valid server-side until its configured
+lifetime expires (default 90 days sliding). For immediate revocation
+after, e.g., a lost laptop, ask your tenant admin to revoke active
+sessions for the user via Entra ID.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadCfg(g)
+			if err != nil {
+				return err
+			}
+			acc := cfg.Account(args[0])
+			if acc == nil {
+				return coded(ExitConfig, fmt.Errorf("account %q not defined in config", args[0]))
+			}
+			a, err := auth.New(*acc)
+			if err != nil {
+				return coded(ExitError, err)
+			}
+			if err := a.Logout(); err != nil {
+				return coded(ExitError, fmt.Errorf("clear cached credentials: %w", err))
+			}
+			fmt.Fprintf(os.Stderr, "cleared local credentials for %s\n", acc.Name)
+			return nil
+		},
+	}
 }
 
 // newInitCmd scaffolds a config file at the user's default path so a

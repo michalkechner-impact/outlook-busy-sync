@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `init` command: scaffolds a starter YAML at the platform-default
+  path with `tenant_id: common` pre-filled, so first-time users do
+  not need to find UUIDs in Azure portal before they can log in.
+  Idempotent: a second run refuses to overwrite an existing file.
+- `logout <account>` command: clears the local token cache (keyring
+  + file fallback) for one account. The `--help` text reminds users
+  that server-side revocation still requires Entra ID admin action.
 - `sync --dry-run` flag: preview every create/update/delete without
   making any Graph writes. Strongly recommended before the first
   scheduled run and after toggling `skip_all_day` / `skip_declined`.

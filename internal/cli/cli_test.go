@@ -38,7 +38,7 @@ func TestExitCode_mapping(t *testing.T) {
 
 func TestNewRoot_hasExpectedSubcommands(t *testing.T) {
 	cmd := NewRoot()
-	want := map[string]bool{"auth": false, "sync": false, "config": false, "status": false, "events": false, "init": false}
+	want := map[string]bool{"auth": false, "logout": false, "sync": false, "config": false, "status": false, "events": false, "init": false}
 	for _, sub := range cmd.Commands() {
 		if _, ok := want[sub.Name()]; ok {
 			want[sub.Name()] = true
