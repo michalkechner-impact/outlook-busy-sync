@@ -61,6 +61,56 @@ is rarely viable for contractors or dual-employees.
 your events from each side and creates matching "Busy" blocks on the other,
 so both colleagues and scheduling assistants see accurate availability.
 
+### Why isn't this a native M365 feature?
+
+Tenant isolation in Microsoft 365 is a deliberate design decision, not an
+oversight. Each tenant is a separate security domain; if cross-tenant
+free/busy were visible by default it would leak organisational metadata
+(meeting density, business cycles, M&A patterns, who meets whom and how
+often).
+
+Microsoft does offer official bridges, but all of them require admin-
+level setup on **both** sides:
+
+| Option                                  | What it gives you                           | Why it's rarely viable for consultants                                                                                                 |
+|-----------------------------------------|---------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| **Organizational Relationships** (federation) | Cross-tenant free/busy in Scheduling Assistant | IT teams at both companies must coordinate, security review takes weeks, usually no business reason to federate for one contractor.    |
+| **B2B guest access / cross-tenant mailbox sharing** | Guest-level calendar access                | Doesn't integrate cleanly with native Scheduling Assistant; shows up as a guest view, not a first-class availability lookup.           |
+| **Tenant-to-tenant mailbox migration**  | Physical mailbox move                       | Wrong shape for dual-employment: you want to keep both accounts separately, not merge them into one tenant.                            |
+
+For a single person working across two tenants, none of those are worth
+the weeks of IT + legal + infosec work at two companies. This tool exists
+because there was no user-space option that "just worked".
+
+### Does this bypass IT security?
+
+No. The tool runs entirely within the permissions you already have as a
+user:
+
+- **Scope**: delegated `Calendars.ReadWrite` on your own mailbox only.
+  It cannot read mail, Teams messages, files, anyone else's calendar, or
+  any tenant-wide resource.
+- **Authentication**: standard device-code OAuth against the pre-approved
+  Microsoft first-party client (or your own app registration if you
+  prefer). No admin consent requested, no app-only credentials used.
+- **What the tenant sees**: "the user created an event in their own
+  calendar" - the most basic M365 write operation, identical to creating
+  any meeting by hand.
+- **What crosses the tenant boundary**: only the timing of blocks. Event
+  titles, bodies, locations, attendees, and categories never leave the
+  source tenant. A configurable static label (default `Busy`) is written
+  in their place.
+
+The inherent leak is the **pattern of your meeting times** on the source
+tenant being visible as busy blocks on the target - which is the whole
+point of the tool. If meeting times themselves are sensitive enough that
+the other side must not be able to infer them, don't use this tool.
+
+Conditional Access policies can still block the first `auth` if the
+tenant gates device-code flow on trusted network location. In practice
+that means connecting to corporate VPN before running `auth` and then
+disconnecting; the refresh token does the rest.
+
 ## Features
 
 - **Privacy-preserving**: copies `start`, `end`, and `showAs=busy` only.
