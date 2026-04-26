@@ -257,6 +257,72 @@ func TestMirror_asymmetricPairsAreIndependent(t *testing.T) {
 	}
 }
 
+func TestMirror_downgradeToBusyClearsContentAndStops(t *testing.T) {
+	// Bugbot-found regression: switching a pair from mirror back to busy
+	// must clear body/location/sensitivity AND the MirrorHash extended
+	// property on existing target events. Otherwise:
+	//   1. Subject becomes "Busy" but body still leaks attendees-as-text.
+	//   2. equalShape sees stale MirrorHash on target vs empty on the
+	//      busy-mode want and churns updates indefinitely.
+	src := &fakeClient{name: "work", events: []graph.Event{{
+		ID:        "s1",
+		Subject:   "Confidential",
+		Start:     tm(2026, 4, 14, 10),
+		End:       tm(2026, 4, 14, 11),
+		ShowAs:    "busy",
+		Location:  "Boardroom",
+		Body:      "agenda",
+		Organizer: "ceo@work.com",
+		Attendees: []string{"adrian@work.com"},
+	}}}
+	dst := &fakeClient{name: "client"}
+	eng := engineWith(src, dst)
+
+	// First, run mirror to populate target with full content + hash.
+	if _, err := eng.RunPair(context.Background(), mirrorPair()); err != nil {
+		t.Fatal(err)
+	}
+	if dst.events[0].MirrorHash == "" {
+		t.Fatal("setup: mirror run should have populated MirrorHash")
+	}
+	if dst.events[0].Body == "" || dst.events[0].Subject != "Confidential" {
+		t.Fatal("setup: mirror should have populated body and real subject")
+	}
+
+	// Now run the same pair in busy mode — simulates user flipping back.
+	stats, err := eng.RunPair(context.Background(), defaultPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Updated != 1 {
+		t.Fatalf("downgrade should issue exactly one update; got %+v", stats)
+	}
+	got := dst.events[0]
+	if got.Subject != "Busy" {
+		t.Errorf("subject must revert to busy title; got %q", got.Subject)
+	}
+	if got.Body != "" {
+		t.Errorf("body must be cleared on downgrade; still has %q", got.Body)
+	}
+	if got.Location != "" {
+		t.Errorf("location must be cleared on downgrade; still has %q", got.Location)
+	}
+	if got.MirrorHash != "" {
+		t.Errorf("MirrorHash must be cleared on downgrade; still has %q (would loop updates)", got.MirrorHash)
+	}
+
+	// Critical: a third run in busy mode must be a no-op. If MirrorHash
+	// were not cleared, equalShape would see have.MirrorHash != "" while
+	// want.MirrorHash == "" and trigger another update, every cycle.
+	stats, err = eng.RunPair(context.Background(), defaultPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Updated != 0 {
+		t.Errorf("after downgrade, busy mode must be idempotent; got %+v (update loop)", stats)
+	}
+}
+
 func TestMirrorHash_stableAcrossAttendeeOrder(t *testing.T) {
 	a := graph.Event{
 		Subject:   "x",

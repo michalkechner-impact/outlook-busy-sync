@@ -317,6 +317,17 @@ func parseGraphTime(dt rawDateTime) (time.Time, error) {
 }
 
 func encodeWrite(e Event) (io.Reader, error) {
+	// Body, location, sensitivity, and the MirrorHash extended property are
+	// ALWAYS written, even when their values are empty/default. A mirror →
+	// busy downgrade flips them back to empty/normal/empty; if we omitted
+	// empty fields here, Graph's PATCH semantics would preserve the prior
+	// mirror content, leaking subject/attendees-as-text into a "Busy"
+	// event and stranding the MirrorHash so equalShape would loop updates
+	// forever.
+	sensitivity := e.Sensitivity
+	if sensitivity == "" {
+		sensitivity = "normal"
+	}
 	body := map[string]any{
 		"subject":  e.Subject,
 		"isAllDay": e.IsAllDay,
@@ -329,28 +340,21 @@ func encodeWrite(e Event) (io.Reader, error) {
 			"dateTime": e.End.UTC().Format("2006-01-02T15:04:05"),
 			"timeZone": "UTC",
 		},
+		"body":        map[string]string{"contentType": "text", "content": e.Body},
+		"location":    map[string]string{"displayName": e.Location},
+		"sensitivity": sensitivity,
 		// Prevent meeting attendees from being auto-populated and prevent
 		// reminder popups cluttering the user's notifications.
 		"isReminderOn": false,
 	}
-	if e.Body != "" {
-		body["body"] = map[string]string{"contentType": "text", "content": e.Body}
-	}
-	if e.Location != "" {
-		body["location"] = map[string]string{"displayName": e.Location}
-	}
-	if e.Sensitivity != "" {
-		body["sensitivity"] = e.Sensitivity
-	}
-	var props []map[string]string
+	// Always emit BOTH extended properties when this is a sync artifact, so
+	// a mirror → busy downgrade clears MirrorHash to "" rather than leaving
+	// the stale hash behind.
 	if e.SourceRef != "" {
-		props = append(props, map[string]string{"id": FullPropID, "value": e.SourceRef})
-	}
-	if e.MirrorHash != "" {
-		props = append(props, map[string]string{"id": FullMirrorHashID, "value": e.MirrorHash})
-	}
-	if len(props) > 0 {
-		body["singleValueExtendedProperties"] = props
+		body["singleValueExtendedProperties"] = []map[string]string{
+			{"id": FullPropID, "value": e.SourceRef},
+			{"id": FullMirrorHashID, "value": e.MirrorHash},
+		}
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
