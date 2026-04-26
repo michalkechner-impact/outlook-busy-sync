@@ -35,8 +35,10 @@ const (
 	// re-comparing free-form text fields that Outlook may rewrite on save.
 	MirrorHashName = "MirrorBodyHash"
 	// FullPropID is the "PropertyId" string Graph API uses for filtering /
-	// expanding extended properties.
-	FullPropID       = "String {" + SyncPropGUID + "} Name " + SyncPropName
+	// expanding the SourceEventRef extended property.
+	FullPropID = "String {" + SyncPropGUID + "} Name " + SyncPropName
+	// FullMirrorHashID is the "PropertyId" string for the MirrorBodyHash
+	// extended property (mirror-mode drift detection).
 	FullMirrorHashID = "String {" + SyncPropGUID + "} Name " + MirrorHashName
 
 	// listPageSize is the $top we request from calendarView. Graph has a
@@ -362,12 +364,12 @@ func encodeWrite(e Event) (io.Reader, error) {
 // It is not a security boundary and not robust against adversarial HTML.
 var htmlTagRegexp = regexp.MustCompile(`(?s)<[^>]+>`)
 
-// teamsJoinURLRegexp matches Microsoft Teams meeting join URLs. We strip
-// these from body content copied to the target tenant: clicking a Teams
-// link from the wrong tenant joins the meeting as an external guest, which
-// some organizers' policies block. Better to force the user back to the
-// original invite.
-var teamsJoinURLRegexp = regexp.MustCompile(`https://teams\.microsoft\.com/l/meetup-join/\S+`)
+// teamsJoinURLPrefix is the literal prefix Microsoft uses for Teams meeting
+// join URLs. We strip these from body content copied to the target tenant:
+// clicking a Teams link from the wrong tenant joins the meeting as an
+// external guest, which some organizers' policies block. Better to force
+// the user back to the original invite.
+const teamsJoinURLPrefix = "https://teams.microsoft.com/l/meetup-join/"
 
 func htmlToPlain(s string) string {
 	s = htmlTagRegexp.ReplaceAllString(s, "")
@@ -398,9 +400,29 @@ func collapseWhitespace(s string) string {
 }
 
 // StripTeamsJoinURL removes Microsoft Teams meeting join URLs from a string.
-// Exported for the sync engine to use when composing mirror bodies.
+// A Teams URL runs from the well-known prefix to the next whitespace
+// character; we replace each occurrence with a placeholder. Exported for
+// the sync engine to use when composing mirror bodies.
 func StripTeamsJoinURL(s string) string {
-	return teamsJoinURLRegexp.ReplaceAllString(s, "[Teams meeting link removed]")
+	const replacement = "[Teams meeting link removed]"
+	var out strings.Builder
+	for {
+		i := strings.Index(s, teamsJoinURLPrefix)
+		if i < 0 {
+			out.WriteString(s)
+			return out.String()
+		}
+		out.WriteString(s[:i])
+		out.WriteString(replacement)
+		// Skip the URL itself: everything from prefix start until the next
+		// whitespace rune (URLs cannot contain unescaped whitespace).
+		s = s[i+len(teamsJoinURLPrefix):]
+		j := strings.IndexAny(s, " \t\r\n")
+		if j < 0 {
+			return out.String()
+		}
+		s = s[j:]
+	}
 }
 
 // doJSON issues an authenticated request. If body is nil, no body is sent.

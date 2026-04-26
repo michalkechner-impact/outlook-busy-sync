@@ -280,21 +280,25 @@ func composeMirrorBody(src graph.Event, fromAccount string) string {
 // is stored as an extended property on the target so subsequent runs can
 // detect drift in O(1) without re-comparing free-form text that Outlook
 // frequently rewrites on save.
+//
+// Stable, line-oriented format: each field on its own line, attendees
+// sorted so attendee re-ordering by Graph cannot trigger a false update.
 func mirrorHash(src graph.Event) string {
-	h := sha256.New()
-	// Stable, line-oriented format: each field on its own line, attendees
-	// sorted so attendee re-ordering by Graph cannot trigger a false update.
-	fmt.Fprintf(h, "subject:%s\n", src.Subject)
-	fmt.Fprintf(h, "start:%s\n", src.Start.UTC().Format(time.RFC3339))
-	fmt.Fprintf(h, "end:%s\n", src.End.UTC().Format(time.RFC3339))
-	fmt.Fprintf(h, "allday:%t\n", src.IsAllDay)
-	fmt.Fprintf(h, "location:%s\n", src.Location)
-	fmt.Fprintf(h, "organizer:%s\n", src.Organizer)
 	atts := append([]string(nil), src.Attendees...)
 	sort.Strings(atts)
-	fmt.Fprintf(h, "attendees:%s\n", strings.Join(atts, ","))
-	fmt.Fprintf(h, "body:%s\n", src.Body)
-	return hex.EncodeToString(h.Sum(nil))
+	canonical := fmt.Sprintf(
+		"subject:%s\nstart:%s\nend:%s\nallday:%t\nlocation:%s\norganizer:%s\nattendees:%s\nbody:%s\n",
+		src.Subject,
+		src.Start.UTC().Format(time.RFC3339),
+		src.End.UTC().Format(time.RFC3339),
+		src.IsAllDay,
+		src.Location,
+		src.Organizer,
+		strings.Join(atts, ","),
+		src.Body,
+	)
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 
 // equalShape compares the fields we write when updating. Graph returns extra
