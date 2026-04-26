@@ -368,6 +368,12 @@ func encodeWrite(e Event) (io.Reader, error) {
 // It is not a security boundary and not robust against adversarial HTML.
 var htmlTagRegexp = regexp.MustCompile(`(?s)<[^>]+>`)
 
+// blockBoundaryRegexp matches the close-tag of common block elements. We
+// substitute these with a literal newline before tag stripping so that
+// "<p>foo</p><p>bar</p>" renders as "foo\nbar" instead of "foobar". Open
+// tags like <br> are handled by the same alternation.
+var blockBoundaryRegexp = regexp.MustCompile(`(?i)</(p|div|li|tr|h[1-6])>|<br\s*/?>`)
+
 // teamsJoinURLPrefix is the literal prefix Microsoft uses for Teams meeting
 // join URLs. We strip these from body content copied to the target tenant:
 // clicking a Teams link from the wrong tenant joins the meeting as an
@@ -376,11 +382,13 @@ var htmlTagRegexp = regexp.MustCompile(`(?s)<[^>]+>`)
 const teamsJoinURLPrefix = "https://teams.microsoft.com/l/meetup-join/"
 
 func htmlToPlain(s string) string {
+	// Insert paragraph breaks at block-element boundaries before stripping
+	// all tags, otherwise "<p>foo</p><p>bar</p>" collapses to "foobar".
+	s = blockBoundaryRegexp.ReplaceAllString(s, "\n")
 	s = htmlTagRegexp.ReplaceAllString(s, "")
 	s = htmlEntityReplacer.Replace(s)
-	// Collapse runs of whitespace (including the line breaks Outlook sprays
-	// between former <p> blocks) but keep single newlines so paragraphs are
-	// still legible.
+	// Collapse runs of whitespace but keep single newlines so paragraphs
+	// stay visually separated.
 	s = collapseWhitespace(s)
 	return strings.TrimSpace(s)
 }
@@ -404,11 +412,18 @@ func collapseWhitespace(s string) string {
 }
 
 // StripTeamsJoinURL removes Microsoft Teams meeting join URLs from a string.
-// A Teams URL runs from the well-known prefix to the next whitespace
-// character; we replace each occurrence with a placeholder. Exported for
-// the sync engine to use when composing mirror bodies.
+// A Teams URL runs from the well-known prefix to a terminator: whitespace,
+// or one of the characters that cannot legally appear in a URL but commonly
+// abuts one in real-world HTML-flattened text (quotes, angle brackets,
+// parentheses). Exported for the sync engine to use when composing mirror
+// bodies.
 func StripTeamsJoinURL(s string) string {
 	const replacement = "[Teams meeting link removed]"
+	// Terminators: whitespace + the URL-illegal characters that show up
+	// adjacent to URLs in HTML-flattened bodies. Without these, an anchor
+	// like `<a href="...join/abc">click here</a>` flattened to
+	// `...join/abcclick here` would consume "click here" along with the URL.
+	const terminators = " \t\r\n<>\"'()"
 	var out strings.Builder
 	for {
 		i := strings.Index(s, teamsJoinURLPrefix)
@@ -418,10 +433,8 @@ func StripTeamsJoinURL(s string) string {
 		}
 		out.WriteString(s[:i])
 		out.WriteString(replacement)
-		// Skip the URL itself: everything from prefix start until the next
-		// whitespace rune (URLs cannot contain unescaped whitespace).
 		s = s[i+len(teamsJoinURLPrefix):]
-		j := strings.IndexAny(s, " \t\r\n")
+		j := strings.IndexAny(s, terminators)
 		if j < 0 {
 			return out.String()
 		}

@@ -232,8 +232,13 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("sync_pairs[%d]: mode %q must be %q or %q", i, p.Mode, ModeBusy, ModeMirror)
 		}
 	}
-	if c.Defaults.Mode != "" && c.Defaults.Mode != ModeBusy && c.Defaults.Mode != ModeMirror {
-		return fmt.Errorf("defaults.mode %q must be %q or %q", c.Defaults.Mode, ModeBusy, ModeMirror)
+	// Mirror mode is forbidden in defaults: it must be opted into per pair.
+	// Allowing defaults.mode: mirror to cascade would silently flip every
+	// new pair into full-content sync — exactly the footgun this tool's
+	// privacy contract is supposed to prevent. defaults.mode is therefore
+	// restricted to busy (the only sensible cascading default).
+	if c.Defaults.Mode != "" && c.Defaults.Mode != ModeBusy {
+		return fmt.Errorf("defaults.mode must be %q (mirror requires explicit per-pair opt-in)", ModeBusy)
 	}
 	return nil
 }

@@ -29,6 +29,47 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 	return c, srv
 }
 
+func TestHtmlToPlain_paragraphsBecomeNewlines(t *testing.T) {
+	// Block elements close-tags must turn into newlines; otherwise the
+	// flattened body glues unrelated paragraphs into one run-on string.
+	cases := map[string]string{
+		"<p>foo</p><p>bar</p>":                    "foo\nbar",
+		"<div>a</div><div>b</div>":                "a\nb",
+		"line1<br>line2":                          "line1\nline2",
+		"line1<br/>line2":                         "line1\nline2",
+		"<h1>Title</h1>body":                      "Title\nbody",
+		"<ul><li>one</li><li>two</li></ul>":       "one\ntwo",
+		"<table><tr><td>r1</td></tr><tr><td>r2</td></tr></table>": "r1\nr2",
+	}
+	for in, want := range cases {
+		if got := htmlToPlain(in); got != want {
+			t.Errorf("htmlToPlain(%q)\n got:  %q\n want: %q", in, got, want)
+		}
+	}
+}
+
+func TestStripTeamsJoinURL_terminatesAtPunctuationNotJustWhitespace(t *testing.T) {
+	// Real-world HTML-flattened bodies can produce
+	//   `https://teams.microsoft.com/l/meetup-join/abc"click here`
+	// (anchor href and display text glued together). Whitespace alone as a
+	// terminator would consume "click here" too. Bugbot regression.
+	cases := map[string]string{
+		`Join: https://teams.microsoft.com/l/meetup-join/abc here`:        "Join: [Teams meeting link removed] here",
+		`Join: <https://teams.microsoft.com/l/meetup-join/abc>click here`: "Join: <[Teams meeting link removed]>click here",
+		`Join: "https://teams.microsoft.com/l/meetup-join/abc"label`:      `Join: "[Teams meeting link removed]"label`,
+		`(https://teams.microsoft.com/l/meetup-join/abc)`:                 "([Teams meeting link removed])",
+		// Terminal URL with no trailing terminator is still safe to drop.
+		`See https://teams.microsoft.com/l/meetup-join/abc`: "See [Teams meeting link removed]",
+		// Two URLs in one string both get replaced.
+		`a https://teams.microsoft.com/l/meetup-join/x and https://teams.microsoft.com/l/meetup-join/y end`: "a [Teams meeting link removed] and [Teams meeting link removed] end",
+	}
+	for in, want := range cases {
+		if got := StripTeamsJoinURL(in); got != want {
+			t.Errorf("StripTeamsJoinURL(%q)\n got:  %q\n want: %q", in, got, want)
+		}
+	}
+}
+
 func TestParseGraphTime_happy(t *testing.T) {
 	got, err := parseGraphTime(rawDateTime{DateTime: "2026-04-13T09:00:00.0000000", TimeZone: "UTC"})
 	if err != nil {
