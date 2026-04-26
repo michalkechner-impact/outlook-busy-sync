@@ -359,6 +359,12 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 		return coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
 	}
 
+	for _, m := range cfg.MirrorPairs() {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: pair %s -> %s is in mirror mode. Subject, location, organizer/attendees-as-text, and body will be copied from %q into %q (marked private). Confirm %q is a tenant you control.\n",
+			m.From, m.To, m.From, m.To, m.To)
+	}
+
 	engine := syncpkg.New(clients, slog.Default())
 	var pairErrors []error
 	for _, p := range cfg.SyncPairs {
@@ -485,8 +491,8 @@ func newStatusCmd(g *globalOpts) *cobra.Command {
 			fmt.Println("Sync pairs:")
 			for _, p := range cfg.SyncPairs {
 				r := p.Resolved(cfg.Defaults)
-				fmt.Printf("  %s -> %s  (window: -%dd..+%dd, title: %q)\n",
-					r.From, r.To, r.LookbackDays, r.LookaheadDays, r.Title)
+				fmt.Printf("  %s -> %s  (mode: %s, window: -%dd..+%dd, title: %q)\n",
+					r.From, r.To, r.Mode, r.LookbackDays, r.LookaheadDays, r.Title)
 			}
 			return nil
 		},
