@@ -1,7 +1,9 @@
 # outlook-busy-sync
 
-Mirror busy blocks between two (or more) Microsoft 365 calendars without
-exposing titles, attendees, or any meeting content.
+Mirror busy blocks between two (or more) Microsoft 365 calendars. By
+default no titles, attendees, or meeting content cross the tenant boundary;
+an opt-in `mirror` mode copies full meeting detail per direction for users
+who own both tenants and want a single unified calendar view.
 
 Built for consultants, dual-employment situations, and anyone whose work
 straddles two M365 tenants. Runs entirely locally - no SaaS, no third-party
@@ -96,10 +98,16 @@ user:
 - **What the tenant sees**: "the user created an event in their own
   calendar" - the most basic M365 write operation, identical to creating
   any meeting by hand.
-- **What crosses the tenant boundary**: only the timing of blocks. Event
-  titles, bodies, locations, attendees, and categories never leave the
-  source tenant. A configurable static label (default `Busy`) is written
-  in their place.
+- **What crosses the tenant boundary in the default `busy` mode**: only
+  the timing of blocks. Event titles, bodies, locations, attendees, and
+  categories never leave the source tenant. A configurable static label
+  (default `Busy`) is written in their place.
+- **Mirror mode (`mode: mirror`, opt-in per direction)** copies subject,
+  location, organiser, attendees-as-text and body into the target event,
+  marked `sensitivity: private` so colleagues with shared-calendar access
+  still only see "Private appointment". Designed exclusively for users who
+  own both tenants (e.g., consultant + employer). Never enable it on a
+  pair whose target is a client tenant.
 
 The inherent leak is the **pattern of your meeting times** on the source
 tenant being visible as busy blocks on the target - which is the whole
@@ -113,9 +121,13 @@ disconnecting; the refresh token does the rest.
 
 ## Features
 
-- **Privacy-preserving**: copies `start`, `end`, and `showAs=busy` only.
-  Event subjects are replaced with a configurable static title (default
-  `Busy`). Bodies, locations, and attendees are never touched.
+- **Privacy-preserving by default**: in the default `busy` mode only
+  `start`, `end`, and `showAs=busy` cross the tenant boundary. Event
+  subjects are replaced with a configurable static title (default `Busy`);
+  bodies, locations, and attendees are never touched. An optional `mirror`
+  mode (per-pair, opt-in) copies subject + location + organiser + attendees
+  + body when the user owns both tenants - see the [Mirror mode](#mirror-mode-optional-opt-in)
+  section.
 - **No app registration required**: uses a pre-approved Microsoft first-party
   client ID for device-code OAuth. Works in most enterprise tenants without
   involving IT. Override with your own registered app if needed.
@@ -341,17 +353,106 @@ Account fields:
 
 Sync-pair fields:
 
-| Field            | Required | Default |
-|------------------|----------|---------|
-| `from`, `to`     | yes      | -       |
-| `lookback_days`  | no       | 1       |
-| `lookahead_days` | no       | 30      |
-| `title`          | no       | `Busy`  |
-| `skip_all_day`   | no       | `true`  |
-| `skip_declined`  | no       | `true`  |
+| Field            | Required | Default | Notes                                                     |
+|------------------|----------|---------|-----------------------------------------------------------|
+| `from`, `to`     | yes      | -       | Account names from the `accounts:` list.                  |
+| `lookback_days`  | no       | 1       |                                                           |
+| `lookahead_days` | no       | 30      |                                                           |
+| `title`          | no       | `Busy`  | Used for the target subject when `mode: busy`.            |
+| `skip_all_day`   | no       | `true`  | Set to `false` to include vacations / OOO.                |
+| `skip_declined`  | no       | `true`  | Set to `false` to include declined invites.               |
+| `mode`           | no       | `busy`  | `busy` (privacy default) or `mirror` (full detail; see below). |
 
 To *include* all-day or declined events in the sync, set the override
-inline on a specific pair (both fields accept an explicit `false`).
+inline on a specific pair (both `skip_*` fields accept an explicit `false`).
+
+## Mirror mode (optional, opt-in)
+
+`mode: mirror` extends a single sync direction from busy-only to copying
+the source event's subject, location, organiser, attendees-as-text and
+body into the target. The target event is created with
+`sensitivity: private`, so colleagues looking at your shared calendar in
+that tenant still see only "Private appointment" or "Busy" - the full
+detail is visible only when the mailbox owner clicks into the event.
+
+The target event is **never** populated with structured attendees, even
+in mirror mode. Attendee emails are copied as plain text inside the body
+on purpose: a structured `attendees` field would cause the second tenant
+to send fresh meeting invitations to everyone listed, which is both
+spammy and confusing.
+
+### When mirror mode is appropriate
+
+- You own **both** tenants (typical: contractor + employer who pays you,
+  with the consultant relationship treating one tenant as the primary
+  workspace and the other as a feed).
+- You want a single unified calendar view in your primary tenant without
+  having to bounce between two Outlook windows.
+- The other tenant's IT and policies treat your activities as your own
+  data (i.e., copying meeting content into it does not violate any data
+  handling agreement).
+
+### When mirror mode is NOT appropriate
+
+- The target tenant belongs to a client. Even though the events are
+  marked `private`, the meeting content is technically present in the
+  client tenant's storage; a client-side tenant admin or a delegate with
+  full access can still read it. Use the default `busy` mode for client
+  tenants.
+- You handle data subject to a contractual confidentiality clause that
+  forbids storing one party's content in the other party's systems.
+- You are unsure who legally owns either tenant.
+
+### Asymmetric configuration
+
+`mode` is per pair, so a bidirectional setup can be asymmetric:
+
+```yaml
+sync_pairs:
+  # Client tenant (ecco) sees only "Busy" blocks for your work in
+  # employer tenant (impact). This is the protective direction.
+  - from: impact
+    to: ecco
+    # mode: busy   ← implicit default, can be omitted
+
+  # In your employer tenant you want full detail of the client work
+  # you're doing, so the mirror direction is ecco -> impact.
+  - from: ecco
+    to: impact
+    mode: mirror
+```
+
+### Privacy guarantees that hold even in mirror mode
+
+- `sensitivity: private` is set on every mirrored target event, masking
+  subject / location / body for non-owner viewers in standard Outlook
+  views and Teams scheduling assistant.
+- Microsoft Teams meeting `joinUrl`s in the source body are stripped
+  before copy; the synced body shows `[Teams meeting link removed]`.
+  Joining a Teams meeting from a mirrored copy in the wrong tenant is
+  often blocked by the organiser's policy, so the link is intentionally
+  not propagated.
+- Attendees are only in the body as plain text - never as structured
+  attendees - so the second tenant cannot send duplicate invitations.
+- Each mirror direction logs a one-line warning to stderr at sync start,
+  reminding the operator which tenant is being written to with full
+  meeting content.
+
+### Update detection in mirror mode
+
+Mirror mode stores a SHA-256 hash of the canonical source payload
+(subject + start + end + isAllDay + location + organiser + sorted
+attendees + body) as a second extended property on the target event.
+Subsequent sync runs compare hash-to-hash rather than comparing free-form
+text, which avoids update churn from Outlook's silent body-HTML rewrites.
+
+### Switching an existing pair from busy to mirror
+
+The first run after flipping a pair from `busy` to `mirror` will issue
+one update per existing target event in the sync window, replacing the
+generic `Busy` subject with the real meeting detail. Use `--dry-run`
+first to preview the volume; a typical 30-day window with ten meetings
+per week produces ~40 updates.
 
 ## Troubleshooting
 
