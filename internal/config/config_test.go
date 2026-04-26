@@ -210,6 +210,28 @@ accounts:
 	}
 }
 
+func TestValidate_rejectsMirrorInDefaults(t *testing.T) {
+	// Mirror mode must be opted into per pair. Allowing defaults.mode: mirror
+	// to cascade would silently flip every existing pair to full-content
+	// sync — exactly the privacy footgun the contract is meant to prevent.
+	p := writeTemp(t, `
+accounts:
+  - {name: a, tenant_id: common}
+  - {name: b, tenant_id: common}
+sync_pairs:
+  - {from: a, to: b}
+defaults:
+  mode: mirror
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("defaults.mode: mirror must be rejected")
+	}
+	if !strings.Contains(err.Error(), "per-pair") {
+		t.Errorf("error should explain the per-pair requirement; got %q", err)
+	}
+}
+
 func TestValidate_acceptsCommonAndUUID(t *testing.T) {
 	p := writeTemp(t, `
 accounts:

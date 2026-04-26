@@ -65,7 +65,21 @@ type SyncPair struct {
 	Title         string `yaml:"title,omitempty"`
 	SkipAllDay    *bool  `yaml:"skip_all_day,omitempty"`
 	SkipDeclined  *bool  `yaml:"skip_declined,omitempty"`
+	// Mode controls how much source-event content is copied to the target.
+	// "" or "busy" (default) writes only an opaque busy block. "mirror" copies
+	// subject, location, organizer/attendees-as-text body, marking the target
+	// event as private so colleagues with shared-calendar access still see
+	// only "Busy". Mirror is only safe when both tenants belong to the same
+	// human; never enable for client tenants.
+	Mode string `yaml:"mode,omitempty"`
 }
+
+// Sync mode constants. ModeBusy is the default and matches the project's
+// privacy-preserving contract: no source content crosses the tenant boundary.
+const (
+	ModeBusy   = "busy"
+	ModeMirror = "mirror"
+)
 
 // Defaults provides fallback values for SyncPair fields. Pointer bools let
 // the user distinguish "unset" from "explicit false" — required because we
@@ -77,6 +91,7 @@ type Defaults struct {
 	Title         string `yaml:"title,omitempty"`
 	SkipAllDay    *bool  `yaml:"skip_all_day,omitempty"`
 	SkipDeclined  *bool  `yaml:"skip_declined,omitempty"`
+	Mode          string `yaml:"mode,omitempty"`
 }
 
 // Resolved returns a SyncPair with all optional fields filled from Defaults.
@@ -89,6 +104,7 @@ func (p SyncPair) Resolved(d Defaults) ResolvedPair {
 		Title:         firstNonEmpty(d.Title, "Busy"),
 		SkipAllDay:    derefBool(d.SkipAllDay, true),
 		SkipDeclined:  derefBool(d.SkipDeclined, true),
+		Mode:          firstNonEmpty(d.Mode, ModeBusy),
 	}
 	if p.LookbackDays != nil {
 		r.LookbackDays = *p.LookbackDays
@@ -105,6 +121,9 @@ func (p SyncPair) Resolved(d Defaults) ResolvedPair {
 	if p.SkipDeclined != nil {
 		r.SkipDeclined = *p.SkipDeclined
 	}
+	if p.Mode != "" {
+		r.Mode = p.Mode
+	}
 	return r
 }
 
@@ -117,6 +136,7 @@ type ResolvedPair struct {
 	Title         string
 	SkipAllDay    bool
 	SkipDeclined  bool
+	Mode          string
 	// DryRun is set from a CLI flag, not YAML. When true the engine must
 	// log what it would do but make no Create/Update/Delete calls.
 	DryRun bool
@@ -208,8 +228,33 @@ func (c *Config) Validate() error {
 		if p.From == p.To {
 			return fmt.Errorf("sync_pairs[%d]: from and to must differ", i)
 		}
+		if p.Mode != "" && p.Mode != ModeBusy && p.Mode != ModeMirror {
+			return fmt.Errorf("sync_pairs[%d]: mode %q must be %q or %q", i, p.Mode, ModeBusy, ModeMirror)
+		}
+	}
+	// Mirror mode is forbidden in defaults: it must be opted into per pair.
+	// Allowing defaults.mode: mirror to cascade would silently flip every
+	// new pair into full-content sync — exactly the footgun this tool's
+	// privacy contract is supposed to prevent. defaults.mode is therefore
+	// restricted to busy (the only sensible cascading default).
+	if c.Defaults.Mode != "" && c.Defaults.Mode != ModeBusy {
+		return fmt.Errorf("defaults.mode must be %q (mirror requires explicit per-pair opt-in)", ModeBusy)
 	}
 	return nil
+}
+
+// MirrorPairs returns the resolved pairs that have mirror mode enabled. The
+// CLI uses this to print a one-time runtime warning so the user is reminded
+// that meeting content is being copied across tenants.
+func (c *Config) MirrorPairs() []ResolvedPair {
+	var out []ResolvedPair
+	for _, p := range c.SyncPairs {
+		r := p.Resolved(c.Defaults)
+		if r.Mode == ModeMirror {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Account returns a copy of the named account with ClientID defaulted, or

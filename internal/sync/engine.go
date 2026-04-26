@@ -11,8 +11,11 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -207,7 +210,15 @@ func shouldSkipSource(ev graph.Event, pair config.ResolvedPair, reversePrefix st
 }
 
 // shape derives the target-side event we want to have in place of src.
+// In busy mode (default) only opaque time/showAs/subject are written, so no
+// source content crosses the tenant boundary. In mirror mode the source's
+// subject, location, organizer/attendees-as-text body and a content hash
+// are copied; the target event is marked private so colleagues with shared
+// calendar access still only see "Busy".
 func shape(src graph.Event, pair config.ResolvedPair, ref string) graph.Event {
+	if pair.Mode == config.ModeMirror {
+		return mirrorShape(src, pair, ref)
+	}
 	return graph.Event{
 		Subject:   pair.Title,
 		Start:     src.Start,
@@ -218,8 +229,84 @@ func shape(src graph.Event, pair config.ResolvedPair, ref string) graph.Event {
 	}
 }
 
+func mirrorShape(src graph.Event, pair config.ResolvedPair, ref string) graph.Event {
+	subject := src.Subject
+	if subject == "" {
+		subject = pair.Title
+	}
+	body := composeMirrorBody(src, pair.From)
+	return graph.Event{
+		Subject:     subject,
+		Start:       src.Start,
+		End:         src.End,
+		IsAllDay:    src.IsAllDay,
+		ShowAs:      "busy",
+		Sensitivity: "private",
+		Location:    src.Location,
+		Body:        body,
+		SourceRef:   ref,
+		MirrorHash:  mirrorHash(src),
+	}
+}
+
+// composeMirrorBody builds a plain-text body that surfaces the meeting
+// context without forwarding active artefacts (Teams join URLs, structured
+// attendee lists that would re-trigger invitations).
+func composeMirrorBody(src graph.Event, fromAccount string) string {
+	var b strings.Builder
+	if src.Subject != "" {
+		fmt.Fprintf(&b, "Title: %s\n", src.Subject)
+	}
+	if src.Organizer != "" {
+		fmt.Fprintf(&b, "Organizer: %s\n", src.Organizer)
+	}
+	if len(src.Attendees) > 0 {
+		fmt.Fprintf(&b, "Attendees:\n")
+		for _, a := range src.Attendees {
+			fmt.Fprintf(&b, "  - %s\n", a)
+		}
+	}
+	if src.Location != "" {
+		fmt.Fprintf(&b, "Location: %s\n", src.Location)
+	}
+	if src.Body != "" {
+		fmt.Fprintf(&b, "\n--- Original description ---\n%s\n", graph.StripTeamsJoinURL(src.Body))
+	}
+	fmt.Fprintf(&b, "\n[synced from %s by outlook-busy-sync]\n", fromAccount)
+	return b.String()
+}
+
+// mirrorHash digests the source fields that drive a mirror event. The hash
+// is stored as an extended property on the target so subsequent runs can
+// detect drift in O(1) without re-comparing free-form text that Outlook
+// frequently rewrites on save.
+//
+// Stable, line-oriented format: each field on its own line, attendees
+// sorted so attendee re-ordering by Graph cannot trigger a false update.
+func mirrorHash(src graph.Event) string {
+	atts := append([]string(nil), src.Attendees...)
+	sort.Strings(atts)
+	canonical := fmt.Sprintf(
+		"subject:%s\nstart:%s\nend:%s\nallday:%t\nlocation:%s\norganizer:%s\nattendees:%s\nbody:%s\n",
+		src.Subject,
+		src.Start.UTC().Format(time.RFC3339),
+		src.End.UTC().Format(time.RFC3339),
+		src.IsAllDay,
+		src.Location,
+		src.Organizer,
+		strings.Join(atts, ","),
+		src.Body,
+	)
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
+}
+
 // equalShape compares the fields we write when updating. Graph returns extra
-// metadata (ID, timestamps) that we do not care about here.
+// metadata (ID, timestamps) that we do not care about here. In mirror mode
+// the comparison is short-circuited to a hash equality check on the
+// previously stored MirrorHash extended property — comparing free-form body
+// text directly would churn updates whenever Outlook normalizes whitespace
+// or rewrites HTML on save.
 func equalShape(have, want graph.Event) bool {
 	if !have.Start.Equal(want.Start) || !have.End.Equal(want.End) {
 		return false
@@ -232,6 +319,14 @@ func equalShape(have, want graph.Event) bool {
 	}
 	if have.ShowAs != want.ShowAs {
 		return false
+	}
+	if want.MirrorHash != "" || have.MirrorHash != "" {
+		// Mirror mode: a missing or different stored hash forces a refresh.
+		// This also handles the upgrade case where an existing busy block
+		// is being lifted into a mirror — have.MirrorHash will be empty.
+		if have.MirrorHash != want.MirrorHash {
+			return false
+		}
 	}
 	return true
 }

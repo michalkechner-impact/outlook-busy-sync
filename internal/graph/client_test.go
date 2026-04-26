@@ -29,6 +29,47 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 	return c, srv
 }
 
+func TestHtmlToPlain_paragraphsBecomeNewlines(t *testing.T) {
+	// Block elements close-tags must turn into newlines; otherwise the
+	// flattened body glues unrelated paragraphs into one run-on string.
+	cases := map[string]string{
+		"<p>foo</p><p>bar</p>":                    "foo\nbar",
+		"<div>a</div><div>b</div>":                "a\nb",
+		"line1<br>line2":                          "line1\nline2",
+		"line1<br/>line2":                         "line1\nline2",
+		"<h1>Title</h1>body":                      "Title\nbody",
+		"<ul><li>one</li><li>two</li></ul>":       "one\ntwo",
+		"<table><tr><td>r1</td></tr><tr><td>r2</td></tr></table>": "r1\nr2",
+	}
+	for in, want := range cases {
+		if got := htmlToPlain(in); got != want {
+			t.Errorf("htmlToPlain(%q)\n got:  %q\n want: %q", in, got, want)
+		}
+	}
+}
+
+func TestStripTeamsJoinURL_terminatesAtPunctuationNotJustWhitespace(t *testing.T) {
+	// Real-world HTML-flattened bodies can produce
+	//   `https://teams.microsoft.com/l/meetup-join/abc"click here`
+	// (anchor href and display text glued together). Whitespace alone as a
+	// terminator would consume "click here" too. Bugbot regression.
+	cases := map[string]string{
+		`Join: https://teams.microsoft.com/l/meetup-join/abc here`:        "Join: [Teams meeting link removed] here",
+		`Join: <https://teams.microsoft.com/l/meetup-join/abc>click here`: "Join: <[Teams meeting link removed]>click here",
+		`Join: "https://teams.microsoft.com/l/meetup-join/abc"label`:      `Join: "[Teams meeting link removed]"label`,
+		`(https://teams.microsoft.com/l/meetup-join/abc)`:                 "([Teams meeting link removed])",
+		// Terminal URL with no trailing terminator is still safe to drop.
+		`See https://teams.microsoft.com/l/meetup-join/abc`: "See [Teams meeting link removed]",
+		// Two URLs in one string both get replaced.
+		`a https://teams.microsoft.com/l/meetup-join/x and https://teams.microsoft.com/l/meetup-join/y end`: "a [Teams meeting link removed] and [Teams meeting link removed] end",
+	}
+	for in, want := range cases {
+		if got := StripTeamsJoinURL(in); got != want {
+			t.Errorf("StripTeamsJoinURL(%q)\n got:  %q\n want: %q", in, got, want)
+		}
+	}
+}
+
 func TestParseGraphTime_happy(t *testing.T) {
 	got, err := parseGraphTime(rawDateTime{DateTime: "2026-04-13T09:00:00.0000000", TimeZone: "UTC"})
 	if err != nil {
@@ -94,6 +135,10 @@ func TestNormalize_errorsOnMissingStart(t *testing.T) {
 }
 
 func TestEncodeWrite_includesExtendedProp(t *testing.T) {
+	// Both extended properties (SourceEventRef + MirrorBodyHash) are always
+	// emitted when SourceRef is set. This is required so a mirror→busy
+	// downgrade clears MirrorHash to "" instead of leaving the stale value
+	// behind, which would loop equalShape into endless updates.
 	r, err := encodeWrite(Event{
 		Subject:   "Busy",
 		Start:     time.Date(2026, 4, 13, 9, 0, 0, 0, time.UTC),
@@ -110,15 +155,55 @@ func TestEncodeWrite_includesExtendedProp(t *testing.T) {
 		t.Fatal(err)
 	}
 	props, ok := body["singleValueExtendedProperties"].([]any)
-	if !ok || len(props) != 1 {
-		t.Fatalf("extendedProperties missing: %v", body)
+	if !ok || len(props) != 2 {
+		t.Fatalf("expected SourceRef + MirrorHash extended props, got: %v", body)
 	}
-	p := props[0].(map[string]any)
-	if p["value"] != "work:abc" {
-		t.Errorf("unexpected prop value %v", p)
+	gotByID := map[string]string{}
+	for _, raw := range props {
+		p := raw.(map[string]any)
+		gotByID[p["id"].(string)] = p["value"].(string)
 	}
-	if !strings.HasPrefix(p["id"].(string), "String {"+SyncPropGUID+"} Name ") {
-		t.Errorf("unexpected prop id %v", p)
+	if gotByID[FullPropID] != "work:abc" {
+		t.Errorf("SourceRef value mismatch: %v", gotByID)
+	}
+	// In busy mode the mirror hash must be emitted as "" so any prior hash
+	// on the target is overwritten.
+	if v, ok := gotByID[FullMirrorHashID]; !ok || v != "" {
+		t.Errorf("MirrorHash must be emitted as empty in busy mode; got %v", gotByID)
+	}
+}
+
+func TestEncodeWrite_busyModeAlwaysClearsMirrorContent(t *testing.T) {
+	// Privacy regression: a mirror→busy downgrade must blank body, location,
+	// and reset sensitivity to "normal" on the wire. Previously these were
+	// only emitted when non-empty, which silently preserved mirror content
+	// in target events that flipped back to busy.
+	r, err := encodeWrite(Event{
+		Subject:   "Busy",
+		Start:     time.Date(2026, 4, 13, 9, 0, 0, 0, time.UTC),
+		End:       time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC),
+		ShowAs:    "busy",
+		SourceRef: "work:abc",
+		// Body / Location / Sensitivity / MirrorHash all empty.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r)
+	var body map[string]any
+	if err := json.Unmarshal(b, &body); err != nil {
+		t.Fatal(err)
+	}
+	bodyField := body["body"].(map[string]any)
+	if bodyField["content"] != "" {
+		t.Errorf("body content must be cleared on busy write; got %q", bodyField["content"])
+	}
+	loc := body["location"].(map[string]any)
+	if loc["displayName"] != "" {
+		t.Errorf("location must be cleared on busy write; got %q", loc["displayName"])
+	}
+	if body["sensitivity"] != "normal" {
+		t.Errorf("sensitivity must be reset to 'normal' on busy write; got %v", body["sensitivity"])
 	}
 }
 

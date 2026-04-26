@@ -31,12 +31,21 @@ accounts:
     tenant_id: 11111111-2222-3333-4444-555555555555
 
 # Sync pairs are one-way copies. List two entries for bidirectional sync so
-# both sides see each other's busy blocks.
+# both sides see each other's busy blocks. Each pair uses the default
+# privacy-preserving "busy" mode unless you opt into "mode: mirror" on a
+# specific direction. Mirror mode is ONLY safe when you own both tenants
+# and the target is not a client mailbox - see the README "Mirror mode"
+# section before enabling it.
 sync_pairs:
   - from: work
     to: client
   - from: client
     to: work
+    # mode: mirror   # uncomment ONLY if you own both tenants and want full
+    #                # meeting detail copied into the target instead of
+    #                # opaque "Busy" blocks. Sets sensitivity:private on the
+    #                # target so colleagues with shared-calendar access still
+    #                # see only "Private appointment".
 
 # Defaults apply to every pair unless overridden inline on a specific pair.
 # All fields are optional; omitted ones fall back to the hard-coded safe

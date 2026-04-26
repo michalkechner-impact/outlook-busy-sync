@@ -199,7 +199,10 @@ accounts:
     email: you@company-b.example
     tenant_id: common
 
-# Bidirectional sync: two one-way pairs with swapped endpoints.
+# Bidirectional sync: two one-way pairs with swapped endpoints. Both
+# pairs use the default privacy-preserving "busy" mode. If you own both
+# tenants and want full meeting detail copied in one direction, add
+# "mode: mirror" to that pair (see README, "Mirror mode" section).
 sync_pairs:
   - from: work
     to: client
@@ -269,11 +272,16 @@ func newEventsCmd(g *globalOpts) *cobra.Command {
 	return cmd
 }
 
-const rootLong = `outlook-busy-sync keeps two (or more) Microsoft 365 calendars aware of each
-other by copying free/busy information from one account to another as
-generic "Busy" blocks. It never copies event titles, locations, bodies or
-attendees, so the detail of meetings on one side is never exposed on the
-other.
+const rootLong = `outlook-busy-sync keeps two (or more) Microsoft 365 calendars aware of
+each other by copying free/busy information from one account to another.
+
+By default ("mode: busy") it writes generic "Busy" blocks - no titles,
+no locations, no bodies, no attendees cross the tenant boundary. An
+opt-in "mode: mirror" copies subject / location / organiser / attendees /
+body into the target event marked sensitivity:private; this is intended
+only for users who own both tenants. The mode is per-pair, so a
+bidirectional setup can be asymmetric (e.g., client tenant sees only
+"Busy", employer tenant sees full detail).
 
 Typical use case: a consultant whose employer and client both use M365.
 Running this tool makes both sides see you as busy during the other's
@@ -357,6 +365,12 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 	}
 	if len(probeErrors) > 0 {
 		return coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
+	}
+
+	for _, m := range cfg.MirrorPairs() {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: pair %s -> %s is in mirror mode. Subject, location, organizer/attendees-as-text, and body will be copied from %q into %q (marked private). Confirm %q is a tenant you control.\n",
+			m.From, m.To, m.From, m.To, m.To)
 	}
 
 	engine := syncpkg.New(clients, slog.Default())
@@ -485,8 +499,8 @@ func newStatusCmd(g *globalOpts) *cobra.Command {
 			fmt.Println("Sync pairs:")
 			for _, p := range cfg.SyncPairs {
 				r := p.Resolved(cfg.Defaults)
-				fmt.Printf("  %s -> %s  (window: -%dd..+%dd, title: %q)\n",
-					r.From, r.To, r.LookbackDays, r.LookaheadDays, r.Title)
+				fmt.Printf("  %s -> %s  (mode: %s, window: -%dd..+%dd, title: %q)\n",
+					r.From, r.To, r.Mode, r.LookbackDays, r.LookaheadDays, r.Title)
 			}
 			return nil
 		},

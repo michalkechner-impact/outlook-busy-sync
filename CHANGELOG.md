@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Mirror mode (`mode: mirror`, opt-in per sync pair). Copies subject,
+  location, organiser, attendees-as-text body, and source body into the
+  target event with `sensitivity: private` so colleagues with
+  shared-calendar access still see only "Private appointment" in standard
+  Outlook views. Designed for users who own both tenants and want a single
+  unified calendar in their primary tenant; explicit warning is logged at
+  every sync run for any mirror pair.
+
+  Privacy guarantees that hold even in mirror mode:
+  - Default mode remains `busy`; mirror requires explicit per-pair opt-in.
+  - `mode` is per direction, so a bidirectional configuration can be
+    asymmetric (typical: `client -> employer` mirrored, `employer -> client`
+    busy-only).
+  - Attendees are written only as plain text inside body; structured
+    attendees are deliberately not populated, preventing the second tenant
+    from sending duplicate meeting invitations.
+  - Microsoft Teams meeting `joinUrl`s are stripped from copied bodies.
+- Mirror update detection uses a SHA-256 hash of the canonical source
+  payload stored as a second extended property (`MirrorBodyHash`),
+  side-stepping Outlook's silent body-HTML rewrites that would otherwise
+  loop the engine into endless updates.
+
 ## [0.2.1] - 2026-04-23
 
 ### Fixed

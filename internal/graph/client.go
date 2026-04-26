@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,16 +23,23 @@ const (
 	DefaultBaseURL = "https://graph.microsoft.com/v1.0"
 
 	// SyncPropGUID is a random namespace owned by this tool, scoping the
-	// single-value extended property we use to tag synced events. Do not
+	// single-value extended properties we use to tag synced events. Do not
 	// change it across releases - existing synced events would become
 	// orphaned.
 	SyncPropGUID = "a6f9b3c8-2e41-4f1c-9b3d-8f2e41c9b3d7"
 	// SyncPropName is the name of the extended property carrying the
 	// "source:id" reference back to the originating event.
 	SyncPropName = "SourceEventRef"
+	// MirrorHashName carries a hex SHA-256 digest of the canonical mirror
+	// payload. It lets equalShape() detect drift in mirror mode without
+	// re-comparing free-form text fields that Outlook may rewrite on save.
+	MirrorHashName = "MirrorBodyHash"
 	// FullPropID is the "PropertyId" string Graph API uses for filtering /
-	// expanding extended properties.
+	// expanding the SourceEventRef extended property.
 	FullPropID = "String {" + SyncPropGUID + "} Name " + SyncPropName
+	// FullMirrorHashID is the "PropertyId" string for the MirrorBodyHash
+	// extended property (mirror-mode drift detection).
+	FullMirrorHashID = "String {" + SyncPropGUID + "} Name " + MirrorHashName
 
 	// listPageSize is the $top we request from calendarView. Graph has a
 	// documented quirk where combining $expand on extended properties with
@@ -81,6 +90,21 @@ type Event struct {
 	// Format: "<account>:<source-event-id>". Only populated for events
 	// created/owned by this tool.
 	SourceRef string
+
+	// Mirror-mode fields. Populated by ListEvents from the source mailbox
+	// and by encodeWrite onto target events. Organizer/Attendees are read
+	// only — we never write them to the target, to avoid sending duplicate
+	// meeting invitations from the second tenant.
+	Body        string   // plain text only; HTML bodies are flattened on read
+	Location    string   // free-form display string from Outlook
+	Sensitivity string   // "normal", "private", "personal", "confidential"
+	Organizer   string   // email of the source-side organizer
+	Attendees   []string // emails of source-side attendees
+	// MirrorHash, when non-empty on a target event, is the hex SHA-256 of
+	// the canonical source payload that produced this mirror. Compared
+	// instead of free-form fields to avoid update churn from Outlook's
+	// silent body-HTML rewrites.
+	MirrorHash string
 }
 
 // ListEvents returns all events between start and end from the primary
@@ -90,8 +114,10 @@ func (c *Client) ListEvents(ctx context.Context, start, end time.Time) ([]Event,
 	q.Set("startDateTime", start.UTC().Format(time.RFC3339))
 	q.Set("endDateTime", end.UTC().Format(time.RFC3339))
 	q.Set("$top", strconv.Itoa(listPageSize))
-	q.Set("$select", "id,subject,start,end,isAllDay,showAs,isCancelled,responseStatus")
-	q.Set("$expand", "singleValueExtendedProperties($filter=id eq '"+FullPropID+"')")
+	q.Set("$select", "id,subject,start,end,isAllDay,showAs,isCancelled,responseStatus,body,location,sensitivity,organizer,attendees")
+	// Expand both extended properties (sync ref + mirror hash). Graph
+	// requires the OR-filter form because $expand only takes one filter.
+	q.Set("$expand", "singleValueExtendedProperties($filter=id eq '"+FullPropID+"' or id eq '"+FullMirrorHashID+"')")
 
 	endpoint := c.baseURL + "/me/calendarView?" + q.Encode()
 	var out []Event
@@ -157,15 +183,20 @@ func (c *Client) DeleteEvent(ctx context.Context, id string) error {
 // --- internals ---
 
 type rawEvent struct {
-	ID             string       `json:"id,omitempty"`
-	Subject        string       `json:"subject"`
-	Start          rawDateTime  `json:"start"`
-	End            rawDateTime  `json:"end"`
-	IsAllDay       bool         `json:"isAllDay"`
-	ShowAs         string       `json:"showAs"`
-	IsCancelled    bool         `json:"isCancelled,omitempty"`
-	ResponseStatus *rawResponse `json:"responseStatus,omitempty"`
-	ExtendedProps  []rawExtProp `json:"singleValueExtendedProperties,omitempty"`
+	ID             string         `json:"id,omitempty"`
+	Subject        string         `json:"subject"`
+	Start          rawDateTime    `json:"start"`
+	End            rawDateTime    `json:"end"`
+	IsAllDay       bool           `json:"isAllDay"`
+	ShowAs         string         `json:"showAs"`
+	IsCancelled    bool           `json:"isCancelled,omitempty"`
+	ResponseStatus *rawResponse   `json:"responseStatus,omitempty"`
+	Body           *rawBody       `json:"body,omitempty"`
+	Location       *rawLocation   `json:"location,omitempty"`
+	Sensitivity    string         `json:"sensitivity,omitempty"`
+	Organizer      *rawOrganizer  `json:"organizer,omitempty"`
+	Attendees      []rawAttendee  `json:"attendees,omitempty"`
+	ExtendedProps  []rawExtProp   `json:"singleValueExtendedProperties,omitempty"`
 }
 
 type rawDateTime struct {
@@ -175,6 +206,29 @@ type rawDateTime struct {
 
 type rawResponse struct {
 	Response string `json:"response"`
+}
+
+type rawBody struct {
+	ContentType string `json:"contentType"`
+	Content     string `json:"content"`
+}
+
+type rawLocation struct {
+	DisplayName string `json:"displayName"`
+}
+
+type rawOrganizer struct {
+	EmailAddress rawEmail `json:"emailAddress"`
+}
+
+type rawAttendee struct {
+	EmailAddress rawEmail `json:"emailAddress"`
+	Type         string   `json:"type,omitempty"`
+}
+
+type rawEmail struct {
+	Name    string `json:"name,omitempty"`
+	Address string `json:"address"`
 }
 
 type rawExtProp struct {
@@ -203,9 +257,31 @@ func (r rawEvent) normalize() (Event, error) {
 	if r.ResponseStatus != nil {
 		e.ResponseType = r.ResponseStatus.Response
 	}
+	if r.Body != nil {
+		if r.Body.ContentType == "html" {
+			e.Body = htmlToPlain(r.Body.Content)
+		} else {
+			e.Body = r.Body.Content
+		}
+	}
+	if r.Location != nil {
+		e.Location = r.Location.DisplayName
+	}
+	e.Sensitivity = r.Sensitivity
+	if r.Organizer != nil {
+		e.Organizer = r.Organizer.EmailAddress.Address
+	}
+	for _, a := range r.Attendees {
+		if a.EmailAddress.Address != "" {
+			e.Attendees = append(e.Attendees, a.EmailAddress.Address)
+		}
+	}
 	for _, p := range r.ExtendedProps {
-		if p.ID == FullPropID {
+		switch p.ID {
+		case FullPropID:
 			e.SourceRef = p.Value
+		case FullMirrorHashID:
+			e.MirrorHash = p.Value
 		}
 	}
 	return e, nil
@@ -241,6 +317,17 @@ func parseGraphTime(dt rawDateTime) (time.Time, error) {
 }
 
 func encodeWrite(e Event) (io.Reader, error) {
+	// Body, location, sensitivity, and the MirrorHash extended property are
+	// ALWAYS written, even when their values are empty/default. A mirror →
+	// busy downgrade flips them back to empty/normal/empty; if we omitted
+	// empty fields here, Graph's PATCH semantics would preserve the prior
+	// mirror content, leaking subject/attendees-as-text into a "Busy"
+	// event and stranding the MirrorHash so equalShape would loop updates
+	// forever.
+	sensitivity := e.Sensitivity
+	if sensitivity == "" {
+		sensitivity = "normal"
+	}
 	body := map[string]any{
 		"subject":  e.Subject,
 		"isAllDay": e.IsAllDay,
@@ -253,13 +340,20 @@ func encodeWrite(e Event) (io.Reader, error) {
 			"dateTime": e.End.UTC().Format("2006-01-02T15:04:05"),
 			"timeZone": "UTC",
 		},
+		"body":        map[string]string{"contentType": "text", "content": e.Body},
+		"location":    map[string]string{"displayName": e.Location},
+		"sensitivity": sensitivity,
 		// Prevent meeting attendees from being auto-populated and prevent
 		// reminder popups cluttering the user's notifications.
 		"isReminderOn": false,
 	}
+	// Always emit BOTH extended properties when this is a sync artifact, so
+	// a mirror → busy downgrade clears MirrorHash to "" rather than leaving
+	// the stale hash behind.
 	if e.SourceRef != "" {
 		body["singleValueExtendedProperties"] = []map[string]string{
 			{"id": FullPropID, "value": e.SourceRef},
+			{"id": FullMirrorHashID, "value": e.MirrorHash},
 		}
 	}
 	buf, err := json.Marshal(body)
@@ -267,6 +361,85 @@ func encodeWrite(e Event) (io.Reader, error) {
 		return nil, err
 	}
 	return bytes.NewReader(buf), nil
+}
+
+// htmlToPlain is a deliberately minimal HTML stripper: we only need it to
+// flatten Outlook's body content into something we can hash and re-display.
+// It is not a security boundary and not robust against adversarial HTML.
+var htmlTagRegexp = regexp.MustCompile(`(?s)<[^>]+>`)
+
+// blockBoundaryRegexp matches the close-tag of common block elements. We
+// substitute these with a literal newline before tag stripping so that
+// "<p>foo</p><p>bar</p>" renders as "foo\nbar" instead of "foobar". Open
+// tags like <br> are handled by the same alternation.
+var blockBoundaryRegexp = regexp.MustCompile(`(?i)</(p|div|li|tr|h[1-6])>|<br\s*/?>`)
+
+// teamsJoinURLPrefix is the literal prefix Microsoft uses for Teams meeting
+// join URLs. We strip these from body content copied to the target tenant:
+// clicking a Teams link from the wrong tenant joins the meeting as an
+// external guest, which some organizers' policies block. Better to force
+// the user back to the original invite.
+const teamsJoinURLPrefix = "https://teams.microsoft.com/l/meetup-join/"
+
+func htmlToPlain(s string) string {
+	// Insert paragraph breaks at block-element boundaries before stripping
+	// all tags, otherwise "<p>foo</p><p>bar</p>" collapses to "foobar".
+	s = blockBoundaryRegexp.ReplaceAllString(s, "\n")
+	s = htmlTagRegexp.ReplaceAllString(s, "")
+	s = htmlEntityReplacer.Replace(s)
+	// Collapse runs of whitespace but keep single newlines so paragraphs
+	// stay visually separated.
+	s = collapseWhitespace(s)
+	return strings.TrimSpace(s)
+}
+
+var htmlEntityReplacer = strings.NewReplacer(
+	"&nbsp;", " ",
+	"&amp;", "&",
+	"&lt;", "<",
+	"&gt;", ">",
+	"&quot;", `"`,
+	"&#39;", "'",
+)
+
+var multiSpaceRegexp = regexp.MustCompile(`[ \t]+`)
+var multiNewlineRegexp = regexp.MustCompile(`\n{3,}`)
+
+func collapseWhitespace(s string) string {
+	s = multiSpaceRegexp.ReplaceAllString(s, " ")
+	s = multiNewlineRegexp.ReplaceAllString(s, "\n\n")
+	return s
+}
+
+// StripTeamsJoinURL removes Microsoft Teams meeting join URLs from a string.
+// A Teams URL runs from the well-known prefix to a terminator: whitespace,
+// or one of the characters that cannot legally appear in a URL but commonly
+// abuts one in real-world HTML-flattened text (quotes, angle brackets,
+// parentheses). Exported for the sync engine to use when composing mirror
+// bodies.
+func StripTeamsJoinURL(s string) string {
+	const replacement = "[Teams meeting link removed]"
+	// Terminators: whitespace + the URL-illegal characters that show up
+	// adjacent to URLs in HTML-flattened bodies. Without these, an anchor
+	// like `<a href="...join/abc">click here</a>` flattened to
+	// `...join/abcclick here` would consume "click here" along with the URL.
+	const terminators = " \t\r\n<>\"'()"
+	var out strings.Builder
+	for {
+		i := strings.Index(s, teamsJoinURLPrefix)
+		if i < 0 {
+			out.WriteString(s)
+			return out.String()
+		}
+		out.WriteString(s[:i])
+		out.WriteString(replacement)
+		s = s[i+len(teamsJoinURLPrefix):]
+		j := strings.IndexAny(s, terminators)
+		if j < 0 {
+			return out.String()
+		}
+		s = s[j:]
+	}
 }
 
 // doJSON issues an authenticated request. If body is nil, no body is sent.
