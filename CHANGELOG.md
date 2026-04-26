@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-27
+
+Optional full-detail sync for users who own both tenants. No breaking
+changes to the default privacy contract: existing configs without an
+explicit `mode:` field continue to behave exactly as in v0.2.x.
+
 ### Added
 - Mirror mode (`mode: mirror`, opt-in per sync pair). Copies subject,
   location, organiser, attendees-as-text body, and source body into the
@@ -18,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Privacy guarantees that hold even in mirror mode:
   - Default mode remains `busy`; mirror requires explicit per-pair opt-in.
+    `defaults.mode: mirror` is rejected at validation time precisely to
+    prevent accidental cascading enablement across all pairs.
   - `mode` is per direction, so a bidirectional configuration can be
     asymmetric (typical: `client -> employer` mirrored, `employer -> client`
     busy-only).
@@ -29,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payload stored as a second extended property (`MirrorBodyHash`),
   side-stepping Outlook's silent body-HTML rewrites that would otherwise
   loop the engine into endless updates.
+- Mirror -> busy downgrade safely clears prior mirror content. `encodeWrite`
+  always emits body, location, sensitivity, and both extended properties
+  (with empty values when unset) so flipping a pair back from `mirror` to
+  `busy` actually wipes leaked subject/attendee text and the stale hash
+  rather than leaving them on the target.
 
 ## [0.2.1] - 2026-04-23
 
@@ -147,7 +160,8 @@ First public release.
 - YAML parser is `go.yaml.in/yaml/v3` (maintained fork of the
   archived `gopkg.in/yaml.v3`).
 
-[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/michalkechner-impact/outlook-busy-sync/releases/tag/v0.1.0
