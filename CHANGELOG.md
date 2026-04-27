@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-27
+
+### Fixed
+- Mirror-mode events now copy the source meeting's `isReminderOn` and
+  `reminderMinutesBeforeStart`, so Outlook on the target tenant fires the
+  same pre-meeting notification as the source. Previously every synced
+  event had reminders hard-coded to off — sensible for opaque busy blocks
+  but the wrong default for mirror, where the events represent real
+  meetings the user has to attend. Busy mode is unchanged: opaque blocks
+  still suppress reminders. Reminder fields are part of the canonical
+  mirror payload, so changing the source's reminder time triggers the
+  expected hash drift and PATCHes the target on the next run.
+
 ## [0.3.0] - 2026-04-27
 
 Optional full-detail sync for users who own both tenants. No breaking
@@ -160,7 +173,8 @@ First public release.
 - YAML parser is `go.yaml.in/yaml/v3` (maintained fork of the
   archived `gopkg.in/yaml.v3`).
 
-[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.1.0...v0.2.0

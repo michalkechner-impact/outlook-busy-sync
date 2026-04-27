@@ -236,16 +236,18 @@ func mirrorShape(src graph.Event, pair config.ResolvedPair, ref string) graph.Ev
 	}
 	body := composeMirrorBody(src, pair.From)
 	return graph.Event{
-		Subject:     subject,
-		Start:       src.Start,
-		End:         src.End,
-		IsAllDay:    src.IsAllDay,
-		ShowAs:      "busy",
-		Sensitivity: "private",
-		Location:    src.Location,
-		Body:        body,
-		SourceRef:   ref,
-		MirrorHash:  mirrorHash(src),
+		Subject:                    subject,
+		Start:                      src.Start,
+		End:                        src.End,
+		IsAllDay:                   src.IsAllDay,
+		ShowAs:                     "busy",
+		Sensitivity:                "private",
+		Location:                   src.Location,
+		Body:                       body,
+		IsReminderOn:               src.IsReminderOn,
+		ReminderMinutesBeforeStart: src.ReminderMinutesBeforeStart,
+		SourceRef:                  ref,
+		MirrorHash:                 mirrorHash(src),
 	}
 }
 
@@ -287,7 +289,7 @@ func mirrorHash(src graph.Event) string {
 	atts := append([]string(nil), src.Attendees...)
 	sort.Strings(atts)
 	canonical := fmt.Sprintf(
-		"subject:%s\nstart:%s\nend:%s\nallday:%t\nlocation:%s\norganizer:%s\nattendees:%s\nbody:%s\n",
+		"subject:%s\nstart:%s\nend:%s\nallday:%t\nlocation:%s\norganizer:%s\nattendees:%s\nbody:%s\nreminderOn:%t\nreminderMin:%d\n",
 		src.Subject,
 		src.Start.UTC().Format(time.RFC3339),
 		src.End.UTC().Format(time.RFC3339),
@@ -296,6 +298,8 @@ func mirrorHash(src graph.Event) string {
 		src.Organizer,
 		strings.Join(atts, ","),
 		src.Body,
+		src.IsReminderOn,
+		src.ReminderMinutesBeforeStart,
 	)
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:])

@@ -100,6 +100,14 @@ type Event struct {
 	Sensitivity string   // "normal", "private", "personal", "confidential"
 	Organizer   string   // email of the source-side organizer
 	Attendees   []string // emails of source-side attendees
+	// IsReminderOn and ReminderMinutesBeforeStart drive Outlook's pre-meeting
+	// notification. Busy-mode shapes leave these zeroed so the legacy
+	// behaviour (no popups for opaque "Busy" blocks) is preserved; mirror
+	// shape copies them from the source so a user running Outlook on the
+	// target tenant gets reminders for the meetings whose source lives in
+	// another tenant.
+	IsReminderOn               bool
+	ReminderMinutesBeforeStart int
 	// MirrorHash, when non-empty on a target event, is the hex SHA-256 of
 	// the canonical source payload that produced this mirror. Compared
 	// instead of free-form fields to avoid update churn from Outlook's
@@ -114,7 +122,7 @@ func (c *Client) ListEvents(ctx context.Context, start, end time.Time) ([]Event,
 	q.Set("startDateTime", start.UTC().Format(time.RFC3339))
 	q.Set("endDateTime", end.UTC().Format(time.RFC3339))
 	q.Set("$top", strconv.Itoa(listPageSize))
-	q.Set("$select", "id,subject,start,end,isAllDay,showAs,isCancelled,responseStatus,body,location,sensitivity,organizer,attendees")
+	q.Set("$select", "id,subject,start,end,isAllDay,showAs,isCancelled,responseStatus,body,location,sensitivity,organizer,attendees,isReminderOn,reminderMinutesBeforeStart")
 	// Expand both extended properties (sync ref + mirror hash). Graph
 	// requires the OR-filter form because $expand only takes one filter.
 	q.Set("$expand", "singleValueExtendedProperties($filter=id eq '"+FullPropID+"' or id eq '"+FullMirrorHashID+"')")
@@ -183,20 +191,22 @@ func (c *Client) DeleteEvent(ctx context.Context, id string) error {
 // --- internals ---
 
 type rawEvent struct {
-	ID             string         `json:"id,omitempty"`
-	Subject        string         `json:"subject"`
-	Start          rawDateTime    `json:"start"`
-	End            rawDateTime    `json:"end"`
-	IsAllDay       bool           `json:"isAllDay"`
-	ShowAs         string         `json:"showAs"`
-	IsCancelled    bool           `json:"isCancelled,omitempty"`
-	ResponseStatus *rawResponse   `json:"responseStatus,omitempty"`
-	Body           *rawBody       `json:"body,omitempty"`
-	Location       *rawLocation   `json:"location,omitempty"`
-	Sensitivity    string         `json:"sensitivity,omitempty"`
-	Organizer      *rawOrganizer  `json:"organizer,omitempty"`
-	Attendees      []rawAttendee  `json:"attendees,omitempty"`
-	ExtendedProps  []rawExtProp   `json:"singleValueExtendedProperties,omitempty"`
+	ID                         string        `json:"id,omitempty"`
+	Subject                    string        `json:"subject"`
+	Start                      rawDateTime   `json:"start"`
+	End                        rawDateTime   `json:"end"`
+	IsAllDay                   bool          `json:"isAllDay"`
+	ShowAs                     string        `json:"showAs"`
+	IsCancelled                bool          `json:"isCancelled,omitempty"`
+	ResponseStatus             *rawResponse  `json:"responseStatus,omitempty"`
+	Body                       *rawBody      `json:"body,omitempty"`
+	Location                   *rawLocation  `json:"location,omitempty"`
+	Sensitivity                string        `json:"sensitivity,omitempty"`
+	Organizer                  *rawOrganizer `json:"organizer,omitempty"`
+	Attendees                  []rawAttendee `json:"attendees,omitempty"`
+	IsReminderOn               *bool         `json:"isReminderOn,omitempty"`
+	ReminderMinutesBeforeStart *int          `json:"reminderMinutesBeforeStart,omitempty"`
+	ExtendedProps              []rawExtProp  `json:"singleValueExtendedProperties,omitempty"`
 }
 
 type rawDateTime struct {
@@ -276,6 +286,12 @@ func (r rawEvent) normalize() (Event, error) {
 			e.Attendees = append(e.Attendees, a.EmailAddress.Address)
 		}
 	}
+	if r.IsReminderOn != nil {
+		e.IsReminderOn = *r.IsReminderOn
+	}
+	if r.ReminderMinutesBeforeStart != nil {
+		e.ReminderMinutesBeforeStart = *r.ReminderMinutesBeforeStart
+	}
 	for _, p := range r.ExtendedProps {
 		switch p.ID {
 		case FullPropID:
@@ -343,9 +359,14 @@ func encodeWrite(e Event) (io.Reader, error) {
 		"body":        map[string]string{"contentType": "text", "content": e.Body},
 		"location":    map[string]string{"displayName": e.Location},
 		"sensitivity": sensitivity,
-		// Prevent meeting attendees from being auto-populated and prevent
-		// reminder popups cluttering the user's notifications.
-		"isReminderOn": false,
+		// Reminder fields are always emitted: in busy mode IsReminderOn is
+		// false (no popups for opaque "Busy" blocks); in mirror mode the
+		// shape copies the source's reminder settings so the user gets a
+		// pre-meeting ping in the target tenant for events whose source
+		// lives in another tenant. Empty values explicitly clear any prior
+		// reminder configuration left over from a mode switch.
+		"isReminderOn":               e.IsReminderOn,
+		"reminderMinutesBeforeStart": e.ReminderMinutesBeforeStart,
 	}
 	// Always emit BOTH extended properties when this is a sync artifact, so
 	// a mirror → busy downgrade clears MirrorHash to "" rather than leaving
