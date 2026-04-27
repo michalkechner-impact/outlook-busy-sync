@@ -58,6 +58,79 @@ func TestMirror_copiesSubjectLocationBodyAndMarksPrivate(t *testing.T) {
 	}
 }
 
+func TestMirror_copiesReminderFromSource(t *testing.T) {
+	src := &fakeClient{name: "work", events: []graph.Event{{
+		ID:                         "s1",
+		Subject:                    "Daily standup",
+		Start:                      tm(2026, 4, 14, 10),
+		End:                        tm(2026, 4, 14, 11),
+		ShowAs:                     "busy",
+		IsReminderOn:               true,
+		ReminderMinutesBeforeStart: 15,
+	}}}
+	dst := &fakeClient{name: "client"}
+	if _, err := engineWith(src, dst).RunPair(context.Background(), mirrorPair()); err != nil {
+		t.Fatal(err)
+	}
+	got := dst.events[0]
+	if !got.IsReminderOn {
+		t.Errorf("mirror must copy IsReminderOn=true from source so the target tenant pings the user before the meeting")
+	}
+	if got.ReminderMinutesBeforeStart != 15 {
+		t.Errorf("mirror must copy reminder minutes; got %d want 15", got.ReminderMinutesBeforeStart)
+	}
+}
+
+func TestMirror_respectsSourceReminderOffSetting(t *testing.T) {
+	// If the source meeting has reminders disabled, mirror must not turn
+	// them on — we copy intent, never impose.
+	src := &fakeClient{name: "work", events: []graph.Event{{
+		ID:           "s1",
+		Subject:      "Silent block",
+		Start:        tm(2026, 4, 14, 10),
+		End:          tm(2026, 4, 14, 11),
+		ShowAs:       "busy",
+		IsReminderOn: false,
+	}}}
+	dst := &fakeClient{name: "client"}
+	if _, err := engineWith(src, dst).RunPair(context.Background(), mirrorPair()); err != nil {
+		t.Fatal(err)
+	}
+	if dst.events[0].IsReminderOn {
+		t.Errorf("mirror must NOT enable reminders when source has them disabled")
+	}
+}
+
+func TestMirror_reminderChangeUpdatesHash(t *testing.T) {
+	// Reminder fields are part of the canonical mirror payload; changing the
+	// source's reminder time must cause the next sync to PATCH the target.
+	src := &fakeClient{name: "work", events: []graph.Event{{
+		ID:                         "s1",
+		Subject:                    "x",
+		Start:                      tm(2026, 4, 14, 10),
+		End:                        tm(2026, 4, 14, 11),
+		ShowAs:                     "busy",
+		IsReminderOn:               true,
+		ReminderMinutesBeforeStart: 15,
+	}}}
+	dst := &fakeClient{name: "client"}
+	eng := engineWith(src, dst)
+	_, _ = eng.RunPair(context.Background(), mirrorPair())
+
+	src.events[0].ReminderMinutesBeforeStart = 60
+
+	stats, err := eng.RunPair(context.Background(), mirrorPair())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Updated != 1 {
+		t.Errorf("reminder change in source must trigger hash drift + update; got %+v", stats)
+	}
+	if dst.events[0].ReminderMinutesBeforeStart != 60 {
+		t.Errorf("target reminder minutes not refreshed: %d", dst.events[0].ReminderMinutesBeforeStart)
+	}
+}
+
 func TestMirror_doesNotPopulateStructuredAttendees(t *testing.T) {
 	// Critical privacy / spam guard: mirror must NEVER write attendees as
 	// structured fields, only as text inside body. Otherwise the second
@@ -164,16 +237,20 @@ func TestMirror_upgradesExistingBusyBlock(t *testing.T) {
 
 func TestMirror_busyDefaultUnchanged(t *testing.T) {
 	// Sanity: mirror code path must not affect the busy default. This is the
-	// privacy contract that all docs and the README depend on.
+	// privacy contract that all docs and the README depend on. Includes a
+	// guard that source reminder settings do not bleed into busy-mode targets
+	// — busy blocks must stay silent regardless of source reminder state.
 	src := &fakeClient{name: "work", events: []graph.Event{{
-		ID:        "s1",
-		Subject:   "Sensitive sync",
-		Start:     tm(2026, 4, 14, 10),
-		End:       tm(2026, 4, 14, 11),
-		ShowAs:    "busy",
-		Location:  "Room 7",
-		Body:      "agenda",
-		Attendees: []string{"adrian@work.com"},
+		ID:                         "s1",
+		Subject:                    "Sensitive sync",
+		Start:                      tm(2026, 4, 14, 10),
+		End:                        tm(2026, 4, 14, 11),
+		ShowAs:                     "busy",
+		Location:                   "Room 7",
+		Body:                       "agenda",
+		Attendees:                  []string{"adrian@work.com"},
+		IsReminderOn:               true,
+		ReminderMinutesBeforeStart: 15,
 	}}}
 	dst := &fakeClient{name: "client"}
 	if _, err := engineWith(src, dst).RunPair(context.Background(), defaultPair()); err != nil {
@@ -182,6 +259,9 @@ func TestMirror_busyDefaultUnchanged(t *testing.T) {
 	got := dst.events[0]
 	if got.Subject != "Busy" {
 		t.Errorf("busy default leaked subject: %q", got.Subject)
+	}
+	if got.IsReminderOn || got.ReminderMinutesBeforeStart != 0 {
+		t.Errorf("busy default must keep reminders off; got isReminderOn=%t minutes=%d", got.IsReminderOn, got.ReminderMinutesBeforeStart)
 	}
 	if got.Body != "" || got.Location != "" || got.Sensitivity != "" || got.MirrorHash != "" {
 		t.Errorf("busy default leaked content: body=%q loc=%q sens=%q hash=%q", got.Body, got.Location, got.Sensitivity, got.MirrorHash)
