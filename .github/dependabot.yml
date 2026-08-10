@@ -8,6 +8,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Let a release sit for three days before we pick it up, so a
+    # compromised or immediately-yanked version has time to surface.
+    cooldown:
+      default-days: 3
     commit-message:
       prefix: deps
       include: scope
@@ -26,3 +30,12 @@ updates:
     labels:
       - dependencies
       - github-actions
+    # init, autobuild and analyze are separate Dependabot dependencies
+    # even though they ship from one repo on one version line. Bumped
+    # individually they drift apart, and the action then aborts with
+    # "Loaded a configuration file for version X, but running version Y".
+    # Grouping forces the three into a single PR.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
