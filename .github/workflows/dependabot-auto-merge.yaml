@@ -17,7 +17,7 @@
 # only expansions reaching shell are:
 #   - step outputs from dependabot/fetch-metadata (a trusted
 #     first-party action whose outputs are fixed enumerations like
-#     'gomod' / 'github_actions' and semver classifiers)
+#     'go_modules' / 'github_actions' and semver classifiers)
 #   - the PR URL, passed via env var and quoted when consumed by gh
 # The injection class at
 # https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
@@ -52,8 +52,11 @@ jobs:
           gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"
 
+      # fetch-metadata reports the Go ecosystem as 'go_modules', not
+      # 'gomod' as dependabot.yml spells it. Matching the wrong spelling
+      # skips this step silently and the job still reports success.
       - name: Auto-approve + auto-merge (go modules, patch/minor only)
-        if: steps.meta.outputs.package-ecosystem == 'gomod' && steps.meta.outputs.update-type != 'version-update:semver-major'
+        if: steps.meta.outputs.package-ecosystem == 'go_modules' && steps.meta.outputs.update-type != 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,7 +65,7 @@ jobs:
           gh pr merge --auto --squash "$PR_URL"
 
       - name: Label major go bumps for manual review
-        if: steps.meta.outputs.package-ecosystem == 'gomod' && steps.meta.outputs.update-type == 'version-update:semver-major'
+        if: steps.meta.outputs.package-ecosystem == 'go_modules' && steps.meta.outputs.update-type == 'version-update:semver-major'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
