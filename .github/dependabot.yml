@@ -27,6 +27,9 @@ updates:
     commit-message:
       prefix: deps(ci)
       include: scope
+    # Same three-day wait as for Go modules.
+    cooldown:
+      default-days: 3
     labels:
       - dependencies
       - github-actions

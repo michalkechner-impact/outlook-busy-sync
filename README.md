@@ -12,9 +12,9 @@ cloud, no admin consent required in most tenants.
 Supported platforms: **macOS, Linux, Windows** (amd64 + arm64 where
 applicable). Single static Go binary, no runtime dependencies.
 
-![Outlook week view with busy blocks synced across tenants](docs/images/screenshot-calendar.png)
+![Two calendars side by side: each meeting in one tenant shows up as a Busy block in the other](docs/images/sync-both-ways.png)
 
-## TL;DR — zero to syncing in 60 seconds
+## TL;DR: zero to syncing in 60 seconds
 
 ```sh
 # 1. install (macOS; see Install section below for Linux/Windows)
@@ -38,7 +38,7 @@ outlook-busy-sync sync --dry-run
 # 6. go live
 outlook-busy-sync sync
 
-# 7. keep it running every 15 minutes — see examples/scheduler/
+# 7. keep it running every 15 minutes (see examples/scheduler/)
 ```
 
 > **Corporate tenant?** If `auth` fails with `AADSTS5019x` or "device not
@@ -155,18 +155,12 @@ disconnecting; the refresh token does the rest.
 brew install michalkechner-impact/tap/outlook-busy-sync
 ```
 
-> The Homebrew tap is published on the first tagged release. If the
-> command above 404s, use **From source** below until the first release
-> lands.
-
 ### Windows (Scoop)
 
 ```powershell
 scoop bucket add michalkechner-impact https://github.com/michalkechner-impact/scoop-bucket
 scoop install outlook-busy-sync
 ```
-
-> Same caveat: the bucket is created by the first tagged release.
 
 ### Pre-built binaries
 
@@ -191,7 +185,7 @@ Unpack and move the binary onto your `PATH`:
 
 ### From source (any OS)
 
-Requires Go 1.22+:
+Requires Go 1.23+:
 
 ```sh
 go install github.com/michalkechner-impact/outlook-busy-sync/cmd/outlook-busy-sync@latest
@@ -305,6 +299,10 @@ For one pair:
    with identical start/end/title; create or update as needed. For each
    previously-created block whose source has disappeared, delete.
 
+![Declined, Free and all-day events are skipped, so nothing is copied for them](docs/images/sync-skipped.png)
+
+![A moved meeting moves its Busy block, a cancelled one deletes it](docs/images/sync-changes.png)
+
 State lives entirely in Graph via the extended property - there is no local
 database, so you can delete the binary and your tokens at any time without
 orphaning sync artifacts (run `outlook-busy-sync sync` once more afterwards
@@ -375,6 +373,8 @@ body into the target. The target event is created with
 that tenant still see only "Private appointment" or "Busy" - the full
 detail is visible only when the mailbox owner clicks into the event.
 
+![Mirror mode copies the meeting into the other tenant, marked Private, with the Teams link removed](docs/images/sync-mirror.png)
+
 The target event is **never** populated with structured attendees, even
 in mirror mode. Attendee emails are copied as plain text inside the body
 on purpose: a structured `attendees` field would cause the second tenant
@@ -409,16 +409,16 @@ spammy and confusing.
 
 ```yaml
 sync_pairs:
-  # Client tenant (ecco) sees only "Busy" blocks for your work in
-  # employer tenant (impact). This is the protective direction.
-  - from: impact
-    to: ecco
+  # The client tenant sees only "Busy" blocks for your work in the
+  # employer tenant. This is the protective direction.
+  - from: work
+    to: client
     # mode: busy   ← implicit default, can be omitted
 
   # In your employer tenant you want full detail of the client work
-  # you're doing, so the mirror direction is ecco -> impact.
-  - from: ecco
-    to: impact
+  # you're doing, so the mirror direction is client -> work.
+  - from: client
+    to: work
     mode: mirror
 ```
 

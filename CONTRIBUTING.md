@@ -14,7 +14,7 @@ make test
 make build
 ```
 
-Requires Go 1.22+. `golangci-lint` is used in CI; install it locally with
+Requires Go 1.23+. `golangci-lint` is used in CI; install it locally with
 `brew install golangci-lint` for identical checks.
 
 ## Project layout

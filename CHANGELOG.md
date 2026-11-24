@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The README screenshot is replaced by four synthetic illustrations:
+  both directions, mirror mode, skipped events, and moves and
+  cancellations. The asymmetric config example now uses the generic
+  `work` / `client` labels.
+- Dependabot's three-day cooldown is now set explicitly for GitHub
+  Actions, as it already was for Go modules (GitHub applied the same
+  default implicitly).
+
 ### Security
 - CI and release builds move from Go 1.25.x to Go 1.26.x. On Go 1.25.14
   govulncheck reports 11 standard-library vulnerabilities reachable from

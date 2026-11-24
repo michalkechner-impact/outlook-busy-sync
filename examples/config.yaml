@@ -50,7 +50,7 @@ sync_pairs:
 # Defaults apply to every pair unless overridden inline on a specific pair.
 # All fields are optional; omitted ones fall back to the hard-coded safe
 # defaults listed in the comments below. Set a field explicitly to change
-# behavior — including setting a boolean to `false` to opt INTO syncing
+# behavior, including setting a boolean to `false` to opt INTO syncing
 # something the safe default excludes.
 defaults:
   lookback_days: 1        # sync source events starting at most N days ago
