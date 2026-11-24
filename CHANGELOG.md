@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `work` / `client` labels.
 - Dependabot's three-day cooldown is now set explicitly for GitHub
   Actions, as it already was for Go modules (GitHub applied the same
-  default implicitly). CI pins `govulncheck` to v1.10.0 instead of
-  installing `@latest`.
+  default implicitly). CI pins `govulncheck` to v1.7.0, the newest
+  release that still runs on the Go 1.25 toolchain CI uses, instead of
+  installing `@latest`, which now needs Go 1.26.
 
 ## [0.3.1] - 2026-04-27
 

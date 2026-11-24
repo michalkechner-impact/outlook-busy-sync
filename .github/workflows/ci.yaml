@@ -69,8 +69,9 @@ jobs:
       - name: Run govulncheck
         run: |
           # Pinned: Dependabot cannot see versions inside run: steps, so
-          # bump this by hand.
-          go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+          # bump this by hand. v1.8.0 and later need Go 1.26; move it
+          # together with go-version above.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
   build-matrix:
