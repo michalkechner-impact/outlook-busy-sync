@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- CI and release builds move from Go 1.25.x to Go 1.26.x. On Go 1.25.14
+  govulncheck reports 11 standard-library vulnerabilities reachable from
+  this code (net/http, crypto/tls, crypto/x509, net/textproto), all fixed
+  only in Go 1.26.9 to 1.26.11. Binaries released so far were built on
+  Go 1.25; the next release ships the fixes.
+- CI pins govulncheck to v1.10.0 instead of installing `@latest`.
+
 ## [0.3.1] - 2026-04-27
 
 ### Fixed
