@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-24
+
 ### Changed
 - The README screenshot is replaced by four synthetic illustrations:
   both directions, mirror mode, skipped events, and moves and
@@ -15,13 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependabot's three-day cooldown is now set explicitly for GitHub
   Actions, as it already was for Go modules (GitHub applied the same
   default implicitly).
+- Dependencies: microsoft-authentication-library-for-go 1.7.1 to 1.10.1,
+  go.yaml.in/yaml/v3 3.0.4 to 3.0.6.
 
 ### Security
-- CI and release builds move from Go 1.25.x to Go 1.26.x. On Go 1.25.14
-  govulncheck reports 11 standard-library vulnerabilities reachable from
-  this code (net/http, crypto/tls, crypto/x509, net/textproto), all fixed
-  only in Go 1.26.9 to 1.26.11. Binaries released so far were built on
-  Go 1.25; the next release ships the fixes.
+- Release binaries are now built with Go 1.26.x. v0.3.1 was built with
+  Go 1.25.9, and on Go 1.25 govulncheck finds 11 standard-library
+  vulnerabilities reachable from this code (net/http, crypto/tls,
+  crypto/x509, net/textproto), all fixed only in Go 1.26.9 to 1.26.11.
+  Upgrading is recommended.
 - CI pins govulncheck to v1.10.0 instead of installing `@latest`.
 
 ## [0.3.1] - 2026-04-27
@@ -190,7 +194,8 @@ First public release.
 - YAML parser is `go.yaml.in/yaml/v3` (maintained fork of the
   archived `gopkg.in/yaml.v3`).
 
-[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/michalkechner-impact/outlook-busy-sync/compare/v0.2.0...v0.2.1
