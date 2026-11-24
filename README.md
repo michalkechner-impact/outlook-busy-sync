@@ -14,7 +14,7 @@ applicable). Single static Go binary, no runtime dependencies.
 
 ![Two calendars side by side: each meeting in one tenant shows up as a Busy block in the other](docs/images/sync-both-ways.png)
 
-## TL;DR — zero to syncing in 60 seconds
+## TL;DR: zero to syncing in 60 seconds
 
 ```sh
 # 1. install (macOS; see Install section below for Linux/Windows)
@@ -38,7 +38,7 @@ outlook-busy-sync sync --dry-run
 # 6. go live
 outlook-busy-sync sync
 
-# 7. keep it running every 15 minutes — see examples/scheduler/
+# 7. keep it running every 15 minutes (see examples/scheduler/)
 ```
 
 > **Corporate tenant?** If `auth` fails with `AADSTS5019x` or "device not
@@ -155,18 +155,12 @@ disconnecting; the refresh token does the rest.
 brew install michalkechner-impact/tap/outlook-busy-sync
 ```
 
-> The Homebrew tap is published on the first tagged release. If the
-> command above 404s, use **From source** below until the first release
-> lands.
-
 ### Windows (Scoop)
 
 ```powershell
 scoop bucket add michalkechner-impact https://github.com/michalkechner-impact/scoop-bucket
 scoop install outlook-busy-sync
 ```
-
-> Same caveat: the bucket is created by the first tagged release.
 
 ### Pre-built binaries
 
@@ -191,7 +185,7 @@ Unpack and move the binary onto your `PATH`:
 
 ### From source (any OS)
 
-Requires Go 1.22+:
+Requires Go 1.23+:
 
 ```sh
 go install github.com/michalkechner-impact/outlook-busy-sync/cmd/outlook-busy-sync@latest
