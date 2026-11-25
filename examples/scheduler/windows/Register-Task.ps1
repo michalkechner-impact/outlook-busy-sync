@@ -24,10 +24,11 @@ $logFile = Join-Path $logDir 'sync.log'
 
 # `cmd /c ... >> log 2>&1` lets us capture stdout+stderr without wrapping
 # the whole thing in PowerShell, which would add cold-start latency on
-# every run.
+# every run. The whole command line gets one more pair of quotes because
+# cmd /c strips the first and last quote when it sees more than two.
 $action = New-ScheduledTaskAction `
     -Execute 'cmd.exe' `
-    -Argument "/c `"$exe`" sync >> `"$logFile`" 2>&1"
+    -Argument "/c `"`"$exe`" sync >> `"$logFile`" 2>&1`""
 
 $trigger = New-ScheduledTaskTrigger `
     -Once `
