@@ -47,6 +47,19 @@ var aadstsHints = map[string]string{
 	"700082": "The saved sign-in expired after a period of inactivity. Run `outlook-busy-sync auth <account>` again.",
 }
 
+// policyBlockCodes are the Conditional Access refusals: the credentials are
+// fine, but the tenant does not allow the sign-in from this network or
+// device (BlockedByConditionalAccess, DeviceNotCompliant,
+// DeviceNotDomainJoined).
+var policyBlockCodes = map[string]bool{"53003": true, "53000": true, "53001": true}
+
+// IsPolicyBlock reports whether err carries the AADSTS code of a
+// Conditional Access refusal. Microsoft does not guarantee these codes, so
+// this is a best-effort classification for status output.
+func IsPolicyBlock(err error) bool {
+	return err != nil && policyBlockCodes[aadstsCodeOf(err.Error())]
+}
+
 // hintedError adds a one-line hint to a token acquisition error. The
 // original error stays in the chain and its text is printed first.
 type hintedError struct {

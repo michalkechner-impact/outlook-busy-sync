@@ -133,3 +133,17 @@ func TestWithHint_keepsChain(t *testing.T) {
 		t.Errorf("original text must be kept: %q", got.Error())
 	}
 }
+
+func TestIsPolicyBlock(t *testing.T) {
+	for _, code := range []string{"53003", "53000", "53001"} {
+		err := withHint(fmt.Errorf("silent token: %w", msalStyleErr(code)), "work")
+		if !IsPolicyBlock(err) {
+			t.Errorf("AADSTS%s is a Conditional Access refusal", code)
+		}
+	}
+	for _, err := range []error{nil, ErrLoginRequired, errors.New("dial tcp: i/o timeout"), msalStyleErr("50076"), msalStyleErr("700082"), msalStyleErr("530032")} {
+		if IsPolicyBlock(err) {
+			t.Errorf("%v must not count as a policy block", err)
+		}
+	}
+}

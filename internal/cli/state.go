@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/auth"
@@ -45,6 +46,11 @@ const (
 	authNotLoggedIn = "not_logged_in"
 	authTimeout     = "timeout"
 	authError       = "error"
+	// authPreconditionUnmet: the account's precondition command did not
+	// exit 0, so its token was not probed.
+	authPreconditionUnmet = "precondition_unmet"
+	// authBlockedByPolicy: Conditional Access refused the token refresh.
+	authBlockedByPolicy = "blocked_by_policy"
 )
 
 // statusReport is the `status --json` document. LastSync is the state
@@ -113,6 +119,12 @@ func buildStatus(ctx context.Context, cfg *config.Config, configPath, statePath 
 
 func probeAccount(ctx context.Context, acc config.Account, newSource func(config.Account) (tokenSource, error)) accountStatus {
 	st := accountStatus{Name: acc.Name, Email: acc.Email}
+	if len(acc.Precondition) > 0 {
+		if err := precondition(ctx, acc.Precondition); err != nil {
+			st.Auth, st.AuthError = authPreconditionUnmet, err.Error()
+			return st
+		}
+	}
 	src, err := newSource(acc)
 	if err != nil {
 		st.Auth, st.AuthError, st.setupFailed = authError, err.Error(), true
@@ -128,6 +140,8 @@ func probeAccount(ctx context.Context, acc config.Account, newSource func(config
 		st.Auth = authNotLoggedIn
 	case errors.Is(err, context.DeadlineExceeded) || errors.Is(probeCtx.Err(), context.DeadlineExceeded):
 		st.Auth, st.AuthError = authTimeout, err.Error()
+	case auth.IsPolicyBlock(err):
+		st.Auth, st.AuthError = authBlockedByPolicy, err.Error()
 	default:
 		st.Auth, st.AuthError = authError, err.Error()
 	}
@@ -149,6 +163,10 @@ func printStatus(cfg *config.Config, r statusReport) {
 			fmt.Printf("  %s\t(%s)\tlogged in\n", a.Name, a.Email)
 		case a.Auth == authNotLoggedIn:
 			fmt.Printf("  %s\t(%s)\tNOT LOGGED IN (run: outlook-busy-sync auth %s)\n", a.Name, a.Email, a.Name)
+		case a.Auth == authPreconditionUnmet:
+			fmt.Printf("  %s\t(%s)\tSKIPPED: %s\n", a.Name, a.Email, a.AuthError)
+		case a.Auth == authBlockedByPolicy:
+			fmt.Printf("  %s\t(%s)\tBLOCKED BY POLICY: %s\n", a.Name, a.Email, a.AuthError)
 		default:
 			fmt.Printf("  %s\t(%s)\tAUTH ERROR: %s\n", a.Name, a.Email, a.AuthError)
 		}
@@ -173,18 +191,28 @@ func lastSyncLine(s *state.State, stateErr error) string {
 	case s.Succeeded():
 		return fmt.Sprintf("Last sync: %s (ok)", localTime(s.LastAttempt))
 	}
-	failed := 0
+	failed, skipped := 0, 0
 	for _, p := range s.Pairs {
-		if p.Error != "" {
+		switch {
+		case p.Reason == state.ReasonPreconditionUnmet:
+			skipped++
+		case p.Error != "":
 			failed++
 		}
+	}
+	var parts []string
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d pair(s) failed", failed, len(s.Pairs)))
+	}
+	if skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d pair(s) skipped, precondition not met", skipped, len(s.Pairs)))
 	}
 	success := "never"
 	if s.LastSuccess != nil {
 		success = localTime(*s.LastSuccess)
 	}
-	return fmt.Sprintf("Last sync: %s (%d of %d pair(s) failed), last success: %s",
-		localTime(s.LastAttempt), failed, len(s.Pairs), success)
+	return fmt.Sprintf("Last sync: %s (%s), last success: %s",
+		localTime(s.LastAttempt), strings.Join(parts, "; "), success)
 }
 
 func localTime(t time.Time) string {

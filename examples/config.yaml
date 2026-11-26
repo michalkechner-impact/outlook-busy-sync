@@ -25,6 +25,10 @@ accounts:
   - name: work            # arbitrary local label - used in sync_pairs + `auth` command
     email: you@company-a.example
     tenant_id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+    # precondition: ["/bin/sh", "-c", "/opt/cisco/secureclient/bin/vpn state | grep -q 'state: Connected'"]
+    #   Optional. Use this account only when the command exits 0, for
+    #   example while the VPN its tenant requires is connected. See the
+    #   README section "Accounts behind a VPN or managed network".
 
   - name: client          # second tenant (different employer, contract, etc.)
     email: ext-you@company-b.example

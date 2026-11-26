@@ -449,6 +449,9 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart={{.ExecStart}}
+# Exit code 4: an account's precondition (for example a VPN check) was not
+# met and its pairs were skipped. Expected, not a failure.
+SuccessExitStatus=4
 
 # Hardening: this is a oneshot that only needs outbound HTTPS and its own
 # token cache. Everything else can be locked down.

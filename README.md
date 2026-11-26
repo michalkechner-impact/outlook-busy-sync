@@ -342,12 +342,13 @@ Top-level fields:
 
 Account fields:
 
-| Field       | Required | Notes                                                          |
-|-------------|----------|----------------------------------------------------------------|
-| `name`      | yes      | Local identifier; used in `sync_pairs` and the `auth` command. |
-| `email`     | no       | Shown in `status`; otherwise cosmetic.                         |
-| `tenant_id` | yes      | Directory UUID, or `common` if unknown.                        |
-| `client_id` | no       | Override the built-in Azure CLI public client ID.              |
+| Field          | Required | Notes                                                          |
+|----------------|----------|----------------------------------------------------------------|
+| `name`         | yes      | Local identifier; used in `sync_pairs` and the `auth` command. |
+| `email`        | no       | Shown in `status`; otherwise cosmetic.                         |
+| `tenant_id`    | yes      | Directory UUID, or `common` if unknown.                        |
+| `client_id`    | no       | Override the built-in Azure CLI public client ID.              |
+| `precondition` | no       | Command that must exit 0 before the account is used (below).   |
 
 Sync-pair fields:
 
@@ -363,6 +364,51 @@ Sync-pair fields:
 
 To *include* all-day or declined events in the sync, set the override
 inline on a specific pair (both `skip_*` fields accept an explicit `false`).
+
+### Accounts behind a VPN or managed network
+
+Some tenants allow sign-in only from their VPN or from a managed device
+(Conditional Access, `AADSTS53003`). Give such an account a
+`precondition`: a command that exits 0 when the account can be used.
+
+```yaml
+accounts:
+  - name: work
+    email: you@company-a.example
+    tenant_id: common
+    # Use this account only while the Cisco VPN is connected.
+    precondition: ["/bin/sh", "-c", "/opt/cisco/secureclient/bin/vpn state | grep -q 'state: Connected'"]
+```
+
+- The first element is the program's absolute path. There is no shell,
+  so pipes need `/bin/sh -c` as above.
+- If the command exits non-zero or takes longer than 10 seconds, `sync`
+  skips every pair that uses the account. It does not open the account's
+  token cache or contact Microsoft, so the tenant logs no failed
+  sign-ins. Pairs between other accounts still run.
+- `sync` then exits with code 4 and records the skipped pairs in the
+  state file (`state.json` in the default config directory) with
+  `"reason": "precondition_unmet"`. `status` shows the account as
+  `SKIPPED` (`precondition_unmet` in `status --json`) without probing
+  its token.
+- `schedule install` writes systemd units that treat exit code 4 as
+  success. In your own scheduler scripts, treat 4 as "nothing failed,
+  something was skipped".
+
+A sign-in that Conditional Access refuses anyway (AADSTS 53003, 53000 or
+53001) is reported as `blocked_by_policy` in `status --json` and in the
+state file. The classification relies on those error codes and is best
+effort.
+
+Exit codes of `sync`:
+
+| Code | Meaning                                                              |
+|------|----------------------------------------------------------------------|
+| 0    | Every pair synced.                                                   |
+| 1    | At least one pair failed.                                            |
+| 2    | Sign-in needed, or a token refresh was refused.                      |
+| 3    | Config or setup error.                                               |
+| 4    | Nothing failed, but pairs were skipped: a precondition was not met.  |
 
 ## Mirror mode (optional, opt-in)
 
@@ -476,6 +522,9 @@ Try in order:
 1. **Connect to corporate VPN and retry.** Many CA policies gate on
    "trusted network location" and clear on VPN. This is the single most
    common fix for consultants working from home or a coworking space.
+   To keep scheduled runs from failing while the VPN is down, give the
+   account a `precondition` (see [Accounts behind a VPN or managed
+   network](#accounts-behind-a-vpn-or-managed-network)).
 2. Ask IT to allow device-code flow for the app (`Calendars.ReadWrite`
    scope), or grant tenant-wide consent for the Azure CLI client ID
    (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`).

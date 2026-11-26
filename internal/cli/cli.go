@@ -24,10 +24,13 @@ import (
 
 // Exit codes. Keep stable: launchd / shell scripts key off these.
 const (
-	ExitOK       = 0
-	ExitError    = 1
-	ExitAuth     = 2
-	ExitConfig   = 3
+	ExitOK     = 0
+	ExitError  = 1
+	ExitAuth   = 2
+	ExitConfig = 3
+	// ExitSkipped means no pair failed, but at least one was skipped because
+	// an account's precondition (for example a VPN check) was not met.
+	ExitSkipped = 4
 )
 
 // ExitCode extracts the intended exit code from an error returned by one of
@@ -329,39 +332,63 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 }
 
 func syncPairs(ctx context.Context, cfg *config.Config, dryRun bool) ([]state.PairResult, error) {
+	return syncPairsWith(ctx, cfg, dryRun, newTokenSource)
+}
+
+// syncPairsWith is syncPairs with the token sources injected, so tests can
+// check which accounts are asked for a token.
+func syncPairsWith(ctx context.Context, cfg *config.Config, dryRun bool, newSource func(config.Account) (tokenSource, error)) ([]state.PairResult, error) {
+	// Accounts whose precondition fails are dropped before anything else:
+	// no token store and no token request, so a tenant that only allows
+	// sign-in from its VPN sees no failed sign-ins while the VPN is down.
+	used := map[string]bool{}
+	for _, p := range cfg.SyncPairs {
+		used[p.From], used[p.To] = true, true
+	}
+	unmet := checkPreconditions(ctx, cfg, used)
+
 	// Build clients up front so we can report all missing auths in one go,
 	// rather than failing on the first pair the user happens to hit.
-	clients := syncpkg.Clients{}
-	authenticators := map[string]*auth.Authenticator{}
+	sources := map[string]tokenSource{}
 	for _, acc := range cfg.Accounts {
-		resolved := *cfg.Account(acc.Name)
-		a, err := auth.New(resolved)
+		if unmet[acc.Name] != nil {
+			continue
+		}
+		src, err := newSource(*cfg.Account(acc.Name))
 		if err != nil {
 			return nil, coded(ExitConfig, fmt.Errorf("auth setup for %s: %w", acc.Name, err))
 		}
-		authenticators[acc.Name] = a
-		clients[acc.Name] = graph.New(a)
+		sources[acc.Name] = src
 	}
 
-	// Determine which accounts are actually used by any configured pair.
+	// Determine which accounts are needed by a pair that will run.
 	usedBy := map[string][]string{} // account -> list of "from→to" pairs that need it
 	for _, p := range cfg.SyncPairs {
+		if skipReason(p, unmet) != nil {
+			continue
+		}
 		usedBy[p.From] = append(usedBy[p.From], fmt.Sprintf("%s→%s", p.From, p.To))
 		usedBy[p.To] = append(usedBy[p.To], fmt.Sprintf("%s→%s", p.From, p.To))
 	}
 
-	// Probe auth for each used account. `ErrLoginRequired` groups into a
+	// Probe auth for each needed account. `ErrLoginRequired` groups into a
 	// single "please re-auth" message; any other error (transport, MSAL
 	// invalid_grant, corrupted cache) is surfaced per-account so the user
 	// actually sees the root cause instead of a downstream Graph 401.
 	var missing []string
 	var probeErrors []error
-	for accName := range usedBy {
-		if _, err := authenticators[accName].Token(ctx); err != nil {
+	blocked := map[string]bool{}
+	for _, acc := range cfg.Accounts {
+		accName := acc.Name
+		if len(usedBy[accName]) == 0 {
+			continue
+		}
+		if _, err := sources[accName].Token(ctx); err != nil {
 			if errors.Is(err, auth.ErrLoginRequired) {
 				missing = append(missing, accName)
 			} else {
 				probeErrors = append(probeErrors, fmt.Errorf("%s: %w", accName, err))
+				blocked[accName] = auth.IsPolicyBlock(err)
 			}
 		}
 	}
@@ -371,23 +398,46 @@ func syncPairs(ctx context.Context, cfg *config.Config, dryRun bool) ([]state.Pa
 			lines = append(lines, fmt.Sprintf("  %s   used by: %s   fix: outlook-busy-sync auth %s",
 				m, strings.Join(usedBy[m], ", "), m))
 		}
-		return nil, coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
+		err := coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
 			len(missing), strings.Join(lines, "\n")))
+		if len(unmet) > 0 {
+			// Keep the skip reason on pairs that would not have run anyway.
+			return probeFailureResults(cfg.SyncPairs, err, unmet, nil), err
+		}
+		return nil, err
 	}
 	if len(probeErrors) > 0 {
-		return nil, coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
+		err := coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
+		return probeFailureResults(cfg.SyncPairs, err, unmet, blocked), err
 	}
 
 	for _, m := range cfg.MirrorPairs() {
+		if unmet[m.From] != nil || unmet[m.To] != nil {
+			continue // skipped below, nothing is copied
+		}
 		fmt.Fprintf(os.Stderr,
 			"WARNING: pair %s -> %s is in mirror mode. Subject, location, organizer/attendees-as-text, and body will be copied from %q into %q (marked private). Confirm %q is a tenant you control.\n",
 			m.From, m.To, m.From, m.To, m.To)
 	}
 
+	clients := syncpkg.Clients{}
+	for name, src := range sources {
+		clients[name] = graph.New(src)
+	}
 	engine := syncpkg.New(clients, slog.Default())
 	var pairErrors []error
+	skipped := 0
 	results := make([]state.PairResult, 0, len(cfg.SyncPairs))
 	for _, p := range cfg.SyncPairs {
+		if reason := skipReason(p, unmet); reason != nil {
+			slog.Info("sync pair skipped",
+				slog.String("from", p.From),
+				slog.String("to", p.To),
+				slog.String("reason", reason.Error()))
+			results = append(results, skippedResult(p, reason))
+			skipped++
+			continue
+		}
 		resolved := p.Resolved(cfg.Defaults)
 		resolved.DryRun = dryRun
 		stats, err := engine.RunPair(ctx, resolved)
@@ -412,7 +462,49 @@ func syncPairs(ctx context.Context, cfg *config.Config, dryRun bool) ([]state.Pa
 	if len(pairErrors) > 0 {
 		return results, coded(ExitError, fmt.Errorf("%d sync pair(s) failed: %w", len(pairErrors), errors.Join(pairErrors...)))
 	}
+	if skipped > 0 {
+		return results, coded(ExitSkipped, fmt.Errorf("%d of %d sync pair(s) skipped: %w",
+			skipped, len(cfg.SyncPairs), errors.Join(unmetErrors(cfg, unmet)...)))
+	}
 	return results, nil
+}
+
+// skipReason returns why p must be skipped, or nil when it can run.
+func skipReason(p config.SyncPair, unmet map[string]error) error {
+	if err := unmet[p.From]; err != nil {
+		return err
+	}
+	return unmet[p.To]
+}
+
+func skippedResult(p config.SyncPair, reason error) state.PairResult {
+	return state.PairResult{
+		From:   p.From,
+		To:     p.To,
+		Error:  state.ShortError(fmt.Errorf("skipped: %w", reason)),
+		Reason: state.ReasonPreconditionUnmet,
+	}
+}
+
+// probeFailureResults records a run stopped by a failed token probe. Pairs
+// that would have been skipped keep their precondition reason; every other
+// pair carries the probe error, marked blocked_by_policy when one of its
+// accounts was refused by Conditional Access.
+func probeFailureResults(pairs []config.SyncPair, err error, unmet map[string]error, blocked map[string]bool) []state.PairResult {
+	msg := state.ShortError(err)
+	out := make([]state.PairResult, 0, len(pairs))
+	for _, p := range pairs {
+		if reason := skipReason(p, unmet); reason != nil {
+			out = append(out, skippedResult(p, reason))
+			continue
+		}
+		r := state.PairResult{From: p.From, To: p.To, Error: msg}
+		if blocked[p.From] || blocked[p.To] {
+			r.Reason = state.ReasonBlockedByPolicy
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // newAuthCmd runs the device code flow for a single account.
