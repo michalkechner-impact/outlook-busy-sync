@@ -287,3 +287,61 @@ func TestDefaultPath_Windows(t *testing.T) {
 		t.Errorf("APPDATA not honoured on Windows: got %q want %q", got, want)
 	}
 }
+
+// absProgram is an absolute program path on the OS running the tests.
+func absProgram() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Windows\System32\cmd.exe`
+	}
+	return "/bin/sh"
+}
+
+func TestLoad_precondition(t *testing.T) {
+	p := writeTemp(t, `
+accounts:
+  - name: work
+    tenant_id: common
+    precondition: ['` + absProgram() + `', "-c", "exit 0"]
+  - name: client
+    tenant_id: common
+sync_pairs:
+  - from: work
+    to: client
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	got := cfg.Account("work").Precondition
+	if len(got) != 3 || got[0] != absProgram() || got[2] != "exit 0" {
+		t.Errorf("precondition: got %q", got)
+	}
+	if cfg.Account("client").Precondition != nil {
+		t.Errorf("an account without precondition must have none, got %q", cfg.Account("client").Precondition)
+	}
+}
+
+func TestValidate_preconditionNeedsAbsoluteProgram(t *testing.T) {
+	cfgWith := func(pre []string) *Config {
+		return &Config{
+			Accounts: []Account{
+				{Name: "work", TenantID: "common", Precondition: pre},
+				{Name: "client", TenantID: "common"},
+			},
+			SyncPairs: []SyncPair{{From: "work", To: "client"}},
+		}
+	}
+	for _, pre := range [][]string{nil, {}, {absProgram(), "-c", "true"}} {
+		if err := cfgWith(pre).Validate(); err != nil {
+			t.Errorf("precondition %q should be valid: %v", pre, err)
+		}
+	}
+	// A relative program would be looked up in the scheduler's PATH, which
+	// is not the user's shell PATH; an empty one is a config mistake.
+	for _, pre := range [][]string{{"vpn", "state"}, {"./check.sh"}, {""}} {
+		err := cfgWith(pre).Validate()
+		if err == nil || !strings.Contains(err.Error(), "absolute path") {
+			t.Errorf("precondition %q: want an absolute-path error, got %v", pre, err)
+		}
+	}
+}

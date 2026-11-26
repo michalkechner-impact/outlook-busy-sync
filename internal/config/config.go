@@ -53,6 +53,11 @@ type Account struct {
 	// ClientID overrides DefaultClientID for this account. Leave empty to use
 	// the pre-approved Azure CLI client ID.
 	ClientID string `yaml:"client_id,omitempty"`
+	// Precondition is an optional command for tenants that only allow
+	// sign-in from their VPN or a managed network. sync and status use the
+	// account only when the command exits 0. The first element is the
+	// program's absolute path; no shell is involved.
+	Precondition []string `yaml:"precondition,omitempty"`
 }
 
 // SyncPair is a one-way copy of busy blocks from one account to another.
@@ -216,6 +221,9 @@ func (c *Config) Validate() error {
 		}
 		if a.ClientID != "" && !tenantIDRegexp.MatchString(a.ClientID) {
 			return fmt.Errorf("accounts[%d] (%s): client_id %q must be a UUID", i, a.Name, a.ClientID)
+		}
+		if len(a.Precondition) > 0 && !filepath.IsAbs(a.Precondition[0]) {
+			return fmt.Errorf("accounts[%d] (%s): precondition must start with the program's absolute path, got %q", i, a.Name, a.Precondition[0])
 		}
 	}
 	for i, p := range c.SyncPairs {

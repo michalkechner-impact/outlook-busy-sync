@@ -248,3 +248,26 @@ func TestLastSyncLine(t *testing.T) {
 		})
 	}
 }
+
+func TestLastSyncLine_skippedPairs(t *testing.T) {
+	first := time.Date(2026, 11, 25, 8, 0, 0, 0, time.UTC)
+	ok := state.Next(nil, first, okResults())
+	skip := state.PairResult{From: "a", To: "b", Error: "skipped: account a: precondition not met", Reason: state.ReasonPreconditionUnmet}
+	allSkipped := state.Next(&ok, first.Add(time.Hour), []state.PairResult{skip, skip})
+	mixed := state.Next(&ok, first.Add(time.Hour), []state.PairResult{skip, {From: "c", To: "d", Error: "boom"}, {From: "d", To: "c"}})
+	tests := []struct {
+		name string
+		s    *state.State
+		want string
+	}{
+		{"all skipped", &allSkipped, "Last sync: " + localTime(first.Add(time.Hour)) + " (2 of 2 pair(s) skipped, precondition not met), last success: " + localTime(first)},
+		{"failed and skipped", &mixed, "Last sync: " + localTime(first.Add(time.Hour)) + " (1 of 3 pair(s) failed; 1 of 3 pair(s) skipped, precondition not met), last success: " + localTime(first)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := lastSyncLine(tc.s, nil); got != tc.want {
+				t.Errorf("got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}

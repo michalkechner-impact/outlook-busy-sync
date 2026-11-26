@@ -45,7 +45,8 @@ type State struct {
 
 // PairResult summarises one sync pair in the most recent run. Failed counts
 // event operations that failed; Error is set whenever the pair as a whole
-// failed, including failures before any event was touched (auth, listing).
+// failed or was skipped, including failures before any event was touched
+// (auth, listing). Reason, when set, classifies Error for status bars.
 type PairResult struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
@@ -54,7 +55,19 @@ type PairResult struct {
 	Deleted int    `json:"deleted"`
 	Failed  int    `json:"failed"`
 	Error   string `json:"error,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
+
+// Reasons a pair did not sync. Any other failure leaves Reason empty.
+const (
+	// ReasonPreconditionUnmet: an account's precondition command did not
+	// exit 0, so the pair was skipped without asking Microsoft for a token.
+	ReasonPreconditionUnmet = "precondition_unmet"
+	// ReasonBlockedByPolicy: the tenant's Conditional Access refused the
+	// sign-in, for example from outside its trusted network. Best effort:
+	// it relies on the AADSTS code in the error.
+	ReasonBlockedByPolicy = "blocked_by_policy"
+)
 
 // Succeeded reports whether every pair in the run succeeded.
 func (s State) Succeeded() bool {
