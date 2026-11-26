@@ -17,6 +17,7 @@ import (
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/auth"
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/config"
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/graph"
+	"github.com/michalkechner-impact/outlook-busy-sync/internal/state"
 	syncpkg "github.com/michalkechner-impact/outlook-busy-sync/internal/sync"
 	"github.com/michalkechner-impact/outlook-busy-sync/internal/version"
 )
@@ -317,7 +318,16 @@ func newSyncCmd(g *globalOpts) *cobra.Command {
 	return cmd
 }
 
+// runSync runs every pair once and, unless dryRun, records the outcome in
+// the state file read by status bars and `status`.
 func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
+	started := time.Now()
+	results, err := syncPairs(ctx, cfg, dryRun)
+	recordSyncState(state.DefaultPath(), dryRun, started, cfg.SyncPairs, results, err)
+	return err
+}
+
+func syncPairs(ctx context.Context, cfg *config.Config, dryRun bool) ([]state.PairResult, error) {
 	// Build clients up front so we can report all missing auths in one go,
 	// rather than failing on the first pair the user happens to hit.
 	clients := syncpkg.Clients{}
@@ -326,7 +336,7 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 		resolved := *cfg.Account(acc.Name)
 		a, err := auth.New(resolved)
 		if err != nil {
-			return coded(ExitConfig, fmt.Errorf("auth setup for %s: %w", acc.Name, err))
+			return nil, coded(ExitConfig, fmt.Errorf("auth setup for %s: %w", acc.Name, err))
 		}
 		authenticators[acc.Name] = a
 		clients[acc.Name] = graph.New(a)
@@ -360,11 +370,11 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 			lines = append(lines, fmt.Sprintf("  %s   used by: %s   fix: outlook-busy-sync auth %s",
 				m, strings.Join(usedBy[m], ", "), m))
 		}
-		return coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
+		return nil, coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
 			len(missing), strings.Join(lines, "\n")))
 	}
 	if len(probeErrors) > 0 {
-		return coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
+		return nil, coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
 	}
 
 	for _, m := range cfg.MirrorPairs() {
@@ -375,21 +385,33 @@ func runSync(ctx context.Context, cfg *config.Config, dryRun bool) error {
 
 	engine := syncpkg.New(clients, slog.Default())
 	var pairErrors []error
+	results := make([]state.PairResult, 0, len(cfg.SyncPairs))
 	for _, p := range cfg.SyncPairs {
 		resolved := p.Resolved(cfg.Defaults)
 		resolved.DryRun = dryRun
-		if _, err := engine.RunPair(ctx, resolved); err != nil {
+		stats, err := engine.RunPair(ctx, resolved)
+		result := state.PairResult{
+			From:    resolved.From,
+			To:      resolved.To,
+			Created: stats.Created,
+			Updated: stats.Updated,
+			Deleted: stats.Deleted,
+			Failed:  stats.Errors,
+		}
+		if err != nil {
 			slog.Error("sync pair failed",
 				slog.String("from", resolved.From),
 				slog.String("to", resolved.To),
 				slog.String("err", err.Error()))
 			pairErrors = append(pairErrors, fmt.Errorf("%s→%s: %w", resolved.From, resolved.To, err))
+			result.Error = state.ShortError(err)
 		}
+		results = append(results, result)
 	}
 	if len(pairErrors) > 0 {
-		return coded(ExitError, fmt.Errorf("%d sync pair(s) failed: %w", len(pairErrors), errors.Join(pairErrors...)))
+		return results, coded(ExitError, fmt.Errorf("%d sync pair(s) failed: %w", len(pairErrors), errors.Join(pairErrors...)))
 	}
-	return nil
+	return results, nil
 }
 
 // newAuthCmd runs the device code flow for a single account.
@@ -459,13 +481,15 @@ func newConfigCmd(g *globalOpts) *cobra.Command {
 	return cmd
 }
 
-// newStatusCmd prints a high-level status. MVP: just show configured pairs
-// and whether each account has a cached token. Richer stats (last-run
-// timestamps) are a future iteration once we persist a run log.
+// newStatusCmd prints each account's auth state, the configured pairs and
+// the last sync recorded by `sync`. --json prints the same data for
+// scripts; a status bar that only needs "last sync" should read the state
+// file directly instead, because this command makes network auth checks.
 func newStatusCmd(g *globalOpts) *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show configured pairs and auth status",
+		Short: "Show configured pairs, auth status and last sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadCfg(g)
 			if err != nil {
@@ -476,33 +500,24 @@ func newStatusCmd(g *globalOpts) *cobra.Command {
 			// running `status` wants a fast diagnosis, not a 30s wait.
 			rootCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
-			for _, acc := range cfg.Accounts {
-				resolved := *cfg.Account(acc.Name)
-				a, err := auth.New(resolved)
-				if err != nil {
-					fmt.Printf("  %s\t(%s)\tERROR: %v\n", acc.Name, acc.Email, err)
-					continue
-				}
-				probeCtx, probeCancel := context.WithTimeout(rootCtx, 5*time.Second)
-				_, err = a.Token(probeCtx)
-				probeCancel()
-				switch {
-				case err == nil:
-					fmt.Printf("  %s\t(%s)\tlogged in\n", acc.Name, acc.Email)
-				case errors.Is(err, auth.ErrLoginRequired):
-					fmt.Printf("  %s\t(%s)\tNOT LOGGED IN (run: outlook-busy-sync auth %s)\n", acc.Name, acc.Email, acc.Name)
-				default:
-					fmt.Printf("  %s\t(%s)\tAUTH ERROR: %v\n", acc.Name, acc.Email, err)
-				}
+			configPath := g.configPath
+			if configPath == "" {
+				configPath = config.DefaultPath()
 			}
-			fmt.Println()
-			fmt.Println("Sync pairs:")
-			for _, p := range cfg.SyncPairs {
-				r := p.Resolved(cfg.Defaults)
-				fmt.Printf("  %s -> %s  (mode: %s, window: -%dd..+%dd, title: %q)\n",
-					r.From, r.To, r.Mode, r.LookbackDays, r.LookaheadDays, r.Title)
+			r := buildStatus(rootCtx, cfg, configPath, state.DefaultPath(), newTokenSource)
+			if !jsonOut {
+				printStatus(cfg, r)
+				return nil
+			}
+			if r.stateErr != nil {
+				slog.Warn("could not read sync state", slog.String("err", r.stateErr.Error()))
+			}
+			if err := writeStatusJSON(os.Stdout, r); err != nil {
+				return coded(ExitError, err)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print machine-readable JSON")
+	return cmd
 }
