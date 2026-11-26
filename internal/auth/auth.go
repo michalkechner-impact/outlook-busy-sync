@@ -57,7 +57,7 @@ func New(account config.Account) (*Authenticator, error) {
 func (a *Authenticator) Login(ctx context.Context, present DeviceCodePresenter) error {
 	dc, err := a.client.AcquireTokenByDeviceCode(ctx, Scopes)
 	if err != nil {
-		return fmt.Errorf("device code: %w", err)
+		return withHint(fmt.Errorf("device code: %w", err), a.account.Name)
 	}
 	if present != nil {
 		r := dc.Result
@@ -65,7 +65,7 @@ func (a *Authenticator) Login(ctx context.Context, present DeviceCodePresenter) 
 	}
 	_, err = dc.AuthenticationResult(ctx)
 	if err != nil {
-		return fmt.Errorf("device code auth: %w", err)
+		return withHint(fmt.Errorf("device code auth: %w", err), a.account.Name)
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func (a *Authenticator) Token(ctx context.Context) (string, error) {
 	}
 	result, err := a.client.AcquireTokenSilent(ctx, Scopes, public.WithSilentAccount(accounts[0]))
 	if err != nil {
-		return "", fmt.Errorf("silent token: %w", err)
+		return "", withHint(fmt.Errorf("silent token: %w", err), a.account.Name)
 	}
 	return result.AccessToken, nil
 }
