@@ -133,28 +133,46 @@ func TestSync_unmetPreconditionSkipsWithoutSignIn(t *testing.T) {
 }
 
 func TestSync_unmetPreconditionLeavesOtherPairs(t *testing.T) {
-	stubPreconditions(t)
-	// home is not logged in, which stops the run before any Graph call.
-	probes := newProbeLog(t, map[string]error{"home": auth.ErrLoginRequired}, "work")
-	cfg := &config.Config{
-		Accounts: []config.Account{
-			{Name: "work", TenantID: "common", Precondition: []string{vpnDown}},
-			{Name: "client", TenantID: "common"},
-			{Name: "home", TenantID: "common"},
-		},
-		SyncPairs: []config.SyncPair{{From: "work", To: "client"}, {From: "client", To: "home"}},
-	}
+	// home fails its probe, which stops the run before any Graph call:
+	// once for a missing login, once for any other probe error.
+	for _, tc := range []struct {
+		name, wantErr string
+		homeErr       error
+	}{
+		{"missing login", "home   used by: client→home", auth.ErrLoginRequired},
+		{"probe error", "auth probe failed: home: dial tcp: i/o timeout", errors.New("dial tcp: i/o timeout")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubPreconditions(t)
+			probes := newProbeLog(t, map[string]error{"home": tc.homeErr}, "work")
+			cfg := &config.Config{
+				Accounts: []config.Account{
+					{Name: "work", TenantID: "common", Precondition: []string{vpnDown}},
+					{Name: "client", TenantID: "common"},
+					{Name: "home", TenantID: "common"},
+				},
+				SyncPairs: []config.SyncPair{{From: "work", To: "client"}, {From: "client", To: "home"}},
+			}
 
-	_, err := syncPairsWith(context.Background(), cfg, false, probes.newSource)
+			results, err := syncPairsWith(context.Background(), cfg, false, probes.newSource)
 
-	if ExitCode(err) != ExitAuth || !strings.Contains(err.Error(), "home   used by: client→home") {
-		t.Fatalf("want the missing login for home, got %d: %v", ExitCode(err), err)
-	}
-	if probes.tokens["client"] != 1 || probes.tokens["home"] != 1 {
-		t.Errorf("the pair without work must still be prepared, tokens: %v", probes.tokens)
-	}
-	if probes.built["work"] != 0 {
-		t.Errorf("work must not get a token store, built: %v", probes.built)
+			if ExitCode(err) != ExitAuth || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("want an auth failure for home, got %d: %v", ExitCode(err), err)
+			}
+			if probes.tokens["client"] != 1 || probes.tokens["home"] != 1 {
+				t.Errorf("the pair without work must still be prepared, tokens: %v", probes.tokens)
+			}
+			if probes.built["work"] != 0 {
+				t.Errorf("work must not get a token store, built: %v", probes.built)
+			}
+			// The state file must still say why work->client did not run.
+			if len(results) != 2 || results[0].Reason != state.ReasonPreconditionUnmet {
+				t.Fatalf("work->client: want precondition_unmet, got %+v", results)
+			}
+			if results[1].Reason != "" || !strings.Contains(results[1].Error, "home") {
+				t.Errorf("client->home: want the probe error without a reason, got %+v", results[1])
+			}
+		})
 	}
 }
 

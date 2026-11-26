@@ -398,8 +398,13 @@ func syncPairsWith(ctx context.Context, cfg *config.Config, dryRun bool, newSour
 			lines = append(lines, fmt.Sprintf("  %s   used by: %s   fix: outlook-busy-sync auth %s",
 				m, strings.Join(usedBy[m], ", "), m))
 		}
-		return nil, coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
+		err := coded(ExitAuth, fmt.Errorf("missing credentials for %d account(s):\n%s",
 			len(missing), strings.Join(lines, "\n")))
+		if len(unmet) > 0 {
+			// Keep the skip reason on pairs that would not have run anyway.
+			return probeFailureResults(cfg.SyncPairs, err, unmet, nil), err
+		}
+		return nil, err
 	}
 	if len(probeErrors) > 0 {
 		err := coded(ExitAuth, fmt.Errorf("auth probe failed: %w", errors.Join(probeErrors...)))
