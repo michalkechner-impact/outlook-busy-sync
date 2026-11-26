@@ -94,6 +94,7 @@ func NewRoot() *cobra.Command {
 	cmd.AddCommand(newStatusCmd(&g))
 	cmd.AddCommand(newEventsCmd(&g))
 	cmd.AddCommand(newInitCmd(&g))
+	cmd.AddCommand(newScheduleCmd(&g))
 	return cmd
 }
 
