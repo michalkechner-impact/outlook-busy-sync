@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only. The flow recognizes blocks written by the CLI and can take them
   over (`removeCliBlocks`), so an existing pair can move from the CLI to
   the flow.
+- An optional heartbeat in the Power Automate template: with `heartbeat`
+  set to true in Settings, every clean run writes the run time and Summary
+  to a file in OneDrive, so a script or status bar can tell when the flow
+  last ran. The package now has a third connection (OneDrive for Business)
+  that the import asks for even when the heartbeat stays off.
 
 ## [0.3.2] - 2026-11-24
 
