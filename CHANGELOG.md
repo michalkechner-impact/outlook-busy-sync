@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A Power Automate flow template in `power-automate/`: two-way busy blocks
+  between two Microsoft 365 calendars, run by Power Automate in the
+  Microsoft cloud, with no install, app registration or VPN. Busy mode
+  only. The flow recognizes blocks written by the CLI and can take them
+  over (`removeCliBlocks`), so an existing pair can move from the CLI to
+  the flow.
+
 ## [0.3.2] - 2026-11-24
 
 ### Changed

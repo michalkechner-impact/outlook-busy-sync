@@ -33,6 +33,7 @@ examples/
     macos/                 launchd LaunchAgent template
     linux/                 systemd user service + timer
     windows/               Task Scheduler registration script
+power-automate/            Power Automate flow template (zip, guide, diagram)
 ```
 
 The `sync` package is the interesting code. `graph.Client` talks to
