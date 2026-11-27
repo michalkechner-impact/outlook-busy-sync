@@ -20,7 +20,8 @@ Every 30 minutes this Power Automate flow copies your meetings between your comp
 2. Select **Create new** and sign in with your **company account**.
 3. Go back to the import tab, refresh the list, select the new connection and **Save**.
 4. Do the same for **Calendar B**, with your **client account**.
-5. Select **Import**. "OBS busy sync" now appears in **My flows**, turned off.
+5. Do the same for **Heartbeat (OneDrive)**, with your **company account**. The flow only writes to OneDrive when you turn on `heartbeat`, but the import asks for the connection either way.
+6. Select **Import**. "OBS busy sync" now appears in **My flows**, turned off.
 
 ## Step 3. Dry run
 1. Open the flow, select **Edit**, then the **Settings** step.
@@ -42,6 +43,16 @@ Every 30 minutes this Power Automate flow copies your meetings between your comp
 - Calendar A is the same company account, Calendar B is the new client.
 - Before you turn it on, set `"pairName"` in Settings, e.g. `"acme"`. Letters and digits only, different for each copy.
 - From 3 copies on, change the **Recurrence** trigger from 30 to 60 minutes to stay under the daily request limit.
+
+## Optional: heartbeat file
+Set `"heartbeat": true` in Settings and every clean run writes `heartbeat.json` to `/obs-busy-sync` in your OneDrive (with a pairName: `heartbeat-<pairName>.json`). The file holds the run time in UTC, a space, then the Summary:
+
+`2026-11-27T12:37:37Z {"AtoB":{"source":26,"mirrors":26,"create":0,...},...}`
+
+- A time older than about an hour means the flow is off, its runs fail, or a connection expired. A run stopped by SafetyCheck writes nothing.
+- `"heartbeatFolder"` changes the folder. It is created if it does not exist.
+- It costs one extra request per run.
+- Reading the file from a script on macOS: a file OneDrive has not downloaded yet fails with "Resource deadlock avoided" in processes that turn off on-demand downloads. Turn them back on in your process first, e.g. in Python: `ctypes.CDLL("/usr/lib/libSystem.B.dylib").setiopolicy_np(3, 0, 2)`.
 
 ## Don't
 - **Don't turn off concurrency control,** even if Power Automate suggests it. Parallel runs create duplicate blocks.
