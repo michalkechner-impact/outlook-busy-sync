@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1015" viewBox="0 0 1000 1015">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5F6368"/></marker></defs>
+<rect width="1000" height="1015" fill="#FFFFFF"/>
+<text x="500" y="42" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="bold" fill="#202124" text-anchor="middle">OBS busy sync (Outlook Busy Sync): jak to działa</text>
+<text x="30" y="88" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#202124" text-anchor="start">1. Kto z kim rozmawia</text>
+<rect x="30" y="105" width="230" height="100" rx="10" fill="#E8F0FE" stroke="#1A73E8" stroke-width="2"/>
+<text x="145" y="143" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#202124" text-anchor="middle">Kalendarz firmowy</text>
+<text x="145" y="166" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="middle">Calendar A</text>
+<text x="145" y="187" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="middle">Twoje konto firmowe</text>
+<rect x="385" y="105" width="230" height="100" rx="10" fill="#F3E8FD" stroke="#8E44AD" stroke-width="2"/>
+<text x="500" y="135" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#202124" text-anchor="middle">Power Automate</text>
+<text x="500" y="157" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="middle">przepływ OBS busy sync</text>
+<text x="500" y="178" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="middle">co 30 minut</text>
+<text x="500" y="196" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="middle">w chmurze Microsoft, bez VPN</text>
+<rect x="740" y="105" width="230" height="100" rx="10" fill="#E6F4EA" stroke="#188038" stroke-width="2"/>
+<text x="855" y="143" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="bold" fill="#202124" text-anchor="middle">Kalendarz u klienta</text>
+<text x="855" y="166" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="middle">Calendar B</text>
+<text x="855" y="187" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="middle">dowolna firma na Microsoft 365</text>
+<line x1="262" y1="160" x2="383" y2="160" stroke="#5F6368" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="322.5" y="148" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">Twoje</text>
+<text x="322.5" y="180" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">logowanie</text>
+<line x1="617" y1="160" x2="738" y2="160" stroke="#5F6368" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="677.5" y="148" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">Twoje</text>
+<text x="677.5" y="180" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">logowanie</text>
+<text x="500" y="240" font-family="Helvetica, Arial, sans-serif" font-size="15"  fill="#202124" text-anchor="middle">Spotkanie w A staje się prywatną blokadą „Busy” w B, i odwrotnie.</text>
+<text x="500" y="262" font-family="Helvetica, Arial, sans-serif" font-size="15"  fill="#5F6368" text-anchor="middle">Przepływ nie czyta tematów, uczestników ani treści spotkań.</text>
+<text x="30" y="312" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#202124" text-anchor="start">2. Co robi każdy przebieg</text>
+<rect x="30" y="330" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="352" r="14" fill="#8E44AD"/>
+<text x="58" y="357" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+<text x="84" y="357" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Ustawienia i okno: od wczoraj do 30 dni naprzód</text>
+<line x1="562" y1="352" x2="588" y2="352" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="357" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">krok Settings</text>
+<line x1="295" y1="375" x2="295" y2="390" stroke="#5F6368" stroke-width="2" marker-end="url(#ar)"/>
+<rect x="30" y="392" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="414" r="14" fill="#8E44AD"/>
+<text x="58" y="419" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
+<text x="84" y="419" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Znajdź kalendarze A i B: po nazwie albo główny</text>
+<line x1="562" y1="414" x2="588" y2="414" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="419" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">brak kalendarza: CalendarNotFound</text>
+<line x1="295" y1="437" x2="295" y2="452" stroke="#5F6368" stroke-width="2" marker-end="url(#ar)"/>
+<rect x="30" y="454" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="476" r="14" fill="#8E44AD"/>
+<text x="58" y="481" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
+<text x="84" y="481" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Odczytaj spotkania: tylko czas, status i ukryty znacznik</text>
+<line x1="562" y1="476" x2="588" y2="476" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="481" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">bez tematów, uczestników i treści</text>
+<line x1="295" y1="499" x2="295" y2="514" stroke="#5F6368" stroke-width="2" marker-end="url(#ar)"/>
+<rect x="30" y="516" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="538" r="14" fill="#8E44AD"/>
+<text x="58" y="543" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
+<text x="84" y="543" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Porównaj spotkania z A z blokadami w B, potem B z A</text>
+<line x1="562" y1="538" x2="588" y2="538" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="543" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">pomija całodniowe, wolne, odwołane, odrzucone</text>
+<line x1="295" y1="561" x2="295" y2="576" stroke="#5F6368" stroke-width="2" marker-end="url(#ar)"/>
+<rect x="30" y="578" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="600" r="14" fill="#8E44AD"/>
+<text x="58" y="605" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">5</text>
+<text x="84" y="605" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Zapisz: utwórz, przesuń albo usuń blokady</text>
+<line x1="562" y1="600" x2="588" y2="600" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="605" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">najwyżej 50 usunięć na przebieg</text>
+<line x1="295" y1="623" x2="295" y2="638" stroke="#5F6368" stroke-width="2" marker-end="url(#ar)"/>
+<rect x="30" y="640" width="530" height="44" rx="8" fill="#F8F9FA" stroke="#9AA0A6" stroke-width="2"/>
+<circle cx="58" cy="662" r="14" fill="#8E44AD"/>
+<text x="58" y="667" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFFFF" text-anchor="middle">6</text>
+<text x="84" y="667" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="start">Summary: liczby; gdy coś nie gra, przebieg staje</text>
+<line x1="562" y1="662" x2="588" y2="662" stroke="#BDC1C6" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="594" y="667" font-family="Helvetica, Arial, sans-serif" font-size="13"  fill="#5F6368" text-anchor="start">stop = błąd SafetyCheck</text>
+<text x="30" y="735" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#202124" text-anchor="start">3. Kilku klientów: jedna kopia przepływu na klienta</text>
+<rect x="400" y="752" width="200" height="54" rx="10" fill="#E8F0FE" stroke="#1A73E8" stroke-width="2"/>
+<text x="500" y="776" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#202124" text-anchor="middle">Kalendarz firmowy (A)</text>
+<text x="500" y="796" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">wspólny środek</text>
+<line x1="440" y1="808" x2="250" y2="878" stroke="#5F6368" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<rect x="150" y="880" width="200" height="48" rx="10" fill="#E6F4EA" stroke="#188038" stroke-width="2"/>
+<text x="250" y="902" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#202124" text-anchor="middle">Klient B</text>
+<text x="250" y="920" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">kopia 1, własne pairName</text>
+<line x1="500" y1="808" x2="500" y2="878" stroke="#5F6368" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<rect x="400" y="880" width="200" height="48" rx="10" fill="#E6F4EA" stroke="#188038" stroke-width="2"/>
+<text x="500" y="902" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#202124" text-anchor="middle">Klient C</text>
+<text x="500" y="920" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">kopia 2, własne pairName</text>
+<line x1="560" y1="808" x2="750" y2="878" stroke="#5F6368" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<rect x="650" y="880" width="200" height="48" rx="10" fill="#E6F4EA" stroke="#188038" stroke-width="2"/>
+<text x="750" y="902" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#202124" text-anchor="middle">Klient D</text>
+<text x="750" y="920" font-family="Helvetica, Arial, sans-serif" font-size="12"  fill="#5F6368" text-anchor="middle">kopia 3, własne pairName</text>
+<text x="500" y="966" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#202124" text-anchor="middle">Spotkania klienta B trafiają do C i D przez kalendarz firmowy.</text>
+<text x="500" y="988" font-family="Helvetica, Arial, sans-serif" font-size="14"  fill="#5F6368" text-anchor="middle">Klientów nie łączymy bezpośrednio. Od 3 kopii przepływ co 60 minut.</text>
+</svg>
