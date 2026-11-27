@@ -14,6 +14,11 @@ applicable). Single static Go binary, no runtime dependencies.
 
 ![Two calendars side by side: each meeting in one tenant shows up as a Busy block in the other](docs/images/sync-both-ways.png)
 
+> **Nothing to install?** [`power-automate/`](power-automate/README.md) has a
+> Power Automate flow that keeps the same two-way busy blocks in sync from
+> the Microsoft cloud, under your own Microsoft 365 licence: no binary, no
+> app registration, no VPN. Busy mode only.
+
 ## TL;DR: zero to syncing in 60 seconds
 
 ```sh
