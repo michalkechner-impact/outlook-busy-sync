@@ -1,60 +1,62 @@
-# OBS busy sync (Outlook Busy Sync): Twoja zajętość widoczna w obu firmach
+# OBS busy sync (Outlook Busy Sync): your busy time visible in both companies
 
-Co 30 minut przenosi Twoje spotkania między kalendarzem firmowym a kalendarzem u klienta jako prywatne blokady „Busy”. Nikt nie zobaczy tematów ani uczestników, bo przepływ w ogóle ich nie czyta.
+Every 30 minutes this Power Automate flow copies your meetings between your company calendar and your client calendar as private "Busy" blocks. Nobody sees subjects or attendees: the flow never reads them.
 
-![Jak działa OBS busy sync](obs-busy-sync-diagram.png)
+![How OBS busy sync works](obs-busy-sync-diagram.png)
 
-## Zanim zaczniesz (2 min)
-- [ ] Klient ma pocztę na Microsoft 365, czyli logujesz się do niej przez outlook.office.com.
-- [ ] IT klienta się zgadza. Jeśli nie wiesz, zapytaj.
-- [ ] Masz plik `obs-busy-sync.zip` i 15 minut.
+## Before you start (2 min)
+- [ ] Your client uses Microsoft 365 for mail (you sign in at outlook.office.com).
+- [ ] Your client's IT is fine with it. Ask if you are not sure.
+- [ ] You have `obs-busy-sync.zip` and 15 minutes.
 
-## Krok 1. Wgraj paczkę
-1. Otwórz make.powerautomate.com, a w nim **Moje przepływy**.
-2. Kliknij **Importuj**, potem **Importuj pakiet (starsza wersja)**.
-3. Kliknij **Przekaż** i wybierz `obs-busy-sync.zip`.
-4. Poczekaj około minuty na komunikat „Twój pakiet został przekazany pomyślnie”.
+## Step 1. Upload the package
+1. Open make.powerautomate.com and go to **My flows**.
+2. Select **Import** > **Import Package (Legacy)**.
+3. Select **Upload** and pick `obs-busy-sync.zip`.
+4. Wait about a minute until the package details appear.
 
-## Krok 2. Podłącz konta
-1. Przy **Calendar A** kliknij **Wybierz podczas importowania**.
-2. Kliknij **Utwórz nowy** i zaloguj się **kontem firmowym**.
-3. Wróć do karty importu. Kliknij **Odśwież listę**, zaznacz nowe połączenie i zapisz.
-4. Zrób to samo przy **Calendar B**, ale **kontem u klienta**.
-5. Kliknij **Importuj**. Przepływ „OBS busy sync” pojawi się w Moich przepływach jako wyłączony.
+## Step 2. Connect your accounts
+1. In the **Calendar A** row, click the **IMPORT SETUP** field.
+2. Select **Create new** and sign in with your **company account**.
+3. Go back to the import tab, refresh the list, select the new connection and **Save**.
+4. Do the same for **Calendar B**, with your **client account**.
+5. Select **Import**. "OBS busy sync" now appears in **My flows**, turned off.
 
-## Krok 3. Próba na sucho
-1. Otwórz przepływ, kliknij **Edytuj**, potem krok **Settings**.
-2. Zmień `"dryRun": false` na `"dryRun": true` i zapisz.
-3. Wróć do przepływu i **włącz** go. Pierwszy przebieg rusza od razu i niczego nie zapisuje.
-4. Po 1-2 minutach otwórz **Historię przebiegów**, potem ostatni przebieg i krok **Summary**.
-5. Sprawdź dwie rzeczy:
-   - `viewA` = `countA` i `viewB` = `countB`;
-   - `AtoB.create` (blokady u klienta) i `BtoA.create` (blokady w firmie) mniej więcej odpowiadają liczbie Twoich spotkań w ciągu 30 dni.
+## Step 3. Dry run
+1. Open the flow, select **Edit**, then the **Settings** step.
+2. Change `"dryRun": false` to `"dryRun": true` and save.
+3. Go back and **turn on** the flow. The first run starts right away and writes nothing.
+4. After 1-2 minutes open the run history, the latest run, then the **Summary** step.
+5. Check two things:
+   - `viewA` = `countA` and `viewB` = `countB`;
+   - `AtoB.create` (blocks for the client calendar) and `BtoA.create` (blocks for the company calendar) roughly match your number of meetings in the next 30 days.
 
-## Krok 4. Na serio
-1. Otwórz **Edytuj**, potem **Settings**, ustaw `"dryRun": false` i zapisz.
-2. Najpóźniej po 30 minutach zobaczysz blokady „Busy” w obu kalendarzach.
+## Step 4. Go live
+1. Select **Edit** > **Settings**, set `"dryRun": false` and save.
+2. Within 30 minutes you will see "Busy" blocks in both calendars.
 
-**Działa, gdy** kolejny przebieg pokazuje w Summary `create`, `update` i `delete` równe 0 w obu kierunkach.
+**It works when** the next run shows `create`, `update` and `delete` at 0 in both directions in Summary.
 
-## Masz drugiego klienta?
-- Zaimportuj ten sam zip jeszcze raz. Wybierz **Utwórz jako nowe** i nadaj inną nazwę.
-- Calendar A to to samo konto firmowe, Calendar B to nowy klient.
-- Zanim włączysz, wpisz w Settings `"pairName"`, np. `"acme"`. Tylko litery i cyfry, każda kopia inna.
-- Od 3 kopii zmień w wyzwalaczu **Recurrence** 30 minut na 60, żeby nie przekroczyć dobowego limitu zapytań.
+## Second client?
+- Import the same zip again, choose **Create as New** and give it another name.
+- Calendar A is the same company account, Calendar B is the new client.
+- Before you turn it on, set `"pairName"` in Settings, e.g. `"acme"`. Letters and digits only, different for each copy.
+- From 3 copies on, change the **Recurrence** trigger from 30 to 60 minutes to stay under the daily request limit.
 
-## Nie rób tego
-- **Nie wyłączaj kontroli współbieżności,** nawet jeśli Power Automate to proponuje. Powstałyby podwójne blokady.
-- **Nie łącz dwóch klientów bezpośrednio.** Zajętość i tak przejdzie przez kalendarz firmowy.
-- **Nie aktualizuj włączonego przepływu.** Wyłącz go, zaimportuj z opcją **Aktualizuj**, przepisz swoje Settings i dopiero włącz.
+## Don't
+- **Don't turn off concurrency control,** even if Power Automate suggests it. Parallel runs create duplicate blocks.
+- **Don't pair two clients directly.** Busy time already reaches them through the company calendar.
+- **Don't update a flow that is on.** Turn it off, import with **Update**, re-enter your Settings, then turn it on.
 
-## Coś nie działa
-| Błąd | Co zrobić |
+## Troubleshooting
+| Error | What to do |
 |---|---|
-| CalendarNotFound | Popraw nazwę w `calendarA` / `calendarB` albo zostaw puste |
-| TooManyEvents | Zmniejsz `daysAhead` w Settings |
-| SafetyCheck | Sprawdź w Summary, czy `viewA` = `countA` i `viewB` = `countB`. Jeśli błąd się powtarza, wyłącz przepływ i daj znać |
-| Nie da się utworzyć połączenia B | Organizacja klienta blokuje Power Automate. Po Twojej stronie nic się z tym nie da zrobić |
+| CalendarNotFound | Fix the name in `calendarA` / `calendarB`, or leave it empty |
+| TooManyEvents | Lower `daysAhead` in Settings |
+| SafetyCheck | In Summary, check that `viewA` = `countA` and `viewB` = `countB`. If it keeps failing, turn the flow off and report it |
+| Can't create the Calendar B connection | Your client's organization blocks Power Automate. Nothing to fix on your side |
 
-## Wyłączenie
-Wyłącz przepływ. Blokady zostaną w kalendarzach: usuń je ręcznie albo poczekaj, aż miną.
+## Turning it off
+Turn the flow off. Existing blocks stay in the calendars: delete them by hand or let them pass.
+
+Every setting explained: [GUIDE.md](GUIDE.md)
